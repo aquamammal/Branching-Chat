@@ -2,14 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Local LLM Chat (echo test)</title>
+  <title>Branching Chat – Columnar Tree</title>
   <style>
+    :root {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: dark;
+    }
+
     body {
       margin: 0;
       padding: 0;
       background: #050505;
       color: #eee;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       display: flex;
       flex-direction: column;
       height: 100vh;
@@ -29,21 +33,119 @@
       margin: 0;
     }
 
-    #chat {
+    header button {
+      border-radius: 999px;
+      border: 1px solid #444;
+      background: #151515;
+      color: #eee;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    header button:hover {
+      background: #222;
+    }
+
+    #thread-container {
       flex: 1;
-      padding: 16px;
+      display: flex;
+      overflow-x: auto;
       overflow-y: auto;
+      padding: 12px 16px;
+      gap: 16px;
+      scroll-behavior: smooth;
+      align-items: center;     /* center column groups vertically */
+    }
+
+    .depth-column {
+      flex: 0 0 340px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 24px;
+      justify-content: center;
+    }
+
+    .depth-label {
+      font-size: 11px;
+      opacity: 0.6;
+      margin-bottom: 4px;
+      padding-left: 4px;
+    }
+
+    .thread {
+      display: flex;
+      flex-direction: column;
+      background: #101010;
+      border-radius: 10px;
+      border: 1px solid #333;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.4);
+      max-height: 420px;
+      transition:
+        transform 0.15s ease,
+        opacity 0.15s ease,
+        max-height 0.15s ease,
+        margin-top 0.2s ease;
+      margin-top: var(--y-offset, 0px);
+    }
+
+    .thread.active {
+      transform: scale(1.03);
+      max-height: 640px;
+      z-index: 2;
+    }
+
+    .thread.collapsed {
+      transform: scale(0.96);
+      opacity: 0.8;
+      max-height: 320px;
+    }
+
+    .thread-header {
+      padding: 6px 10px;
+      border-bottom: 1px solid #222;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #151515;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+    }
+
+    .thread-title {
+      font-weight: 500;
+    }
+
+    .thread-meta {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+
+    .thread-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .thread-footer {
+      padding: 8px;
+      border-top: 1px solid #222;
+      display: flex;
+      gap: 6px;
+      background: #0b0b0b;
+      border-radius: 0 0 10px 10px;
     }
 
     .msg {
-      max-width: 70%;
-      padding: 8px 10px;
+      padding: 6px 8px;
       border-radius: 8px;
+      font-size: 13px;
+      position: relative;
       white-space: pre-wrap;
-      font-size: 14px;
     }
 
     .msg.user {
@@ -56,110 +158,610 @@
       background: #262626;
     }
 
-    #input-bar {
-      padding: 8px;
-      border-top: 1px solid #222;
-      display: flex;
-      gap: 8px;
-      background: #050505;
+    .msg.system {
+      align-self: center;
+      background: #111;
+      opacity: 0.8;
+      font-size: 11px;
     }
 
-    #user-input {
+    .msg-meta {
+      font-size: 10px;
+      opacity: 0.7;
+      margin-bottom: 2px;
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .msg-role {
+      text-transform: uppercase;
+    }
+
+    .msg-text {
+      font-size: 13px;
+    }
+
+    .branch-highlight {
+      background: #2a7c52;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+
+    input[type="text"] {
       flex: 1;
-      padding: 8px 10px;
+      padding: 6px 8px;
       border-radius: 6px;
       border: 1px solid #333;
       background: #050505;
       color: #eee;
-      font-size: 14px;
+      font-size: 13px;
     }
 
-    #user-input:focus {
+    input[type="text"]:focus {
       outline: none;
       border-color: #555;
     }
 
     button {
-      border-radius: 6px;
       border: 1px solid #444;
       background: #151515;
       color: #eee;
-      padding: 8px 12px;
-      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
       cursor: pointer;
     }
 
     button:hover {
       background: #222;
     }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid #444;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    #selection-branch-btn {
+      position: absolute;
+      z-index: 1000;
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: 999px;
+      border: 1px solid #555;
+      background: #111;
+      color: #eee;
+      cursor: pointer;
+      display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    }
   </style>
 </head>
 <body>
 <header>
-  <h1>Local LLM Chat (echo)</h1>
-  <span style="font-size:12px;opacity:0.7;">We’re just echoing for now, no LLM yet.</span>
+  <h1>Branching Chat (Columns by Depth)</h1>
+  <button id="new-root-btn">+ New root conversation</button>
 </header>
 
-<div id="chat"></div>
-
-<div id="input-bar">
-  <input id="user-input" type="text" placeholder="Ask something..." />
-  <button id="send-btn">Send</button>
-</div>
+<div id="thread-container"></div>
+<button id="selection-branch-btn">Branch selection →</button>
 
 <script>
-  const THREAD_ID = "root";
+  // ---------- Data ----------
+  let threadCounter = 1;
+  let messageCounter = 1;
+  let highlightCounter = 1;
+  let activeThreadId = null;
 
-  const chatEl = document.getElementById("chat");
-  const inputEl = document.getElementById("user-input");
-  const sendBtn = document.getElementById("send-btn");
+  // after render, if this is set we focus that thread's input
+  let pendingFocusThreadId = null;
 
-  const messages = [];
+  const threads = [];
 
-  function render() {
-    chatEl.innerHTML = "";
-    for (const m of messages) {
-      const div = document.createElement("div");
-      div.className = "msg " + m.role;
-      div.textContent = m.role + ": " + m.content;
-      chatEl.appendChild(div);
-    }
-    chatEl.scrollTop = chatEl.scrollHeight;
+  function setActiveThread(id) {
+    activeThreadId = id;
+    render();
   }
 
-  async function sendMessage() {
-    const text = inputEl.value.trim();
-    if (!text) return;
+  function createThread({ title, depth, parentId = null, parentSnippet = null }) {
+    const id = "t" + threadCounter++;
 
-    // push user message
-    messages.push({ role: "user", content: text });
-    inputEl.value = "";
+    const messages = [];
+
+    if (parentSnippet) {
+      messages.push({
+        id: "m" + messageCounter++,
+        role: "system",
+        content:
+`You are continuing a new conversation that branches off a previous one.
+
+Parent thread: ${parentId}
+Context from the previous assistant message:
+${parentSnippet}`
+      });
+    } else {
+      messages.push({
+        id: "m" + messageCounter++,
+        role: "system",
+        content: "You are a helpful local assistant in a root conversation node."
+      });
+    }
+
+    const thread = { id, depth, parentId, parentSnippet, title, messages };
+    threads.push(thread);
+
+    if (!activeThreadId) activeThreadId = thread.id;
+    return thread;
+  }
+
+  const containerEl = document.getElementById("thread-container");
+  const selectionBranchBtn = document.getElementById("selection-branch-btn");
+
+  // ---------- Helpers: scrolling & focus ----------
+
+  function scrollAllThreadsToBottom() {
+    const bodies = containerEl.querySelectorAll(".thread-body");
+    bodies.forEach(b => {
+      b.scrollTop = b.scrollHeight;
+    });
+  }
+
+  function keepThreadScrolledToBottom(threadId) {
+    const threadEl = [...document.querySelectorAll(".thread")]
+      .find(el => el.dataset.threadId === threadId);
+    if (!threadEl) return;
+    const bodyEl = threadEl.querySelector(".thread-body");
+    if (!bodyEl) return;
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
+  function focusInputForThread(threadId) {
+    const inputEl = document.querySelector(
+      `.thread[data-thread-id="${threadId}"] input[type="text"]`
+    );
+    if (inputEl) {
+      inputEl.focus();
+      const val = inputEl.value;
+      inputEl.value = "";
+      inputEl.value = val;
+    }
+  }
+
+  // ---------- Messaging ----------
+
+  function addUserMessage(threadId, text) {
+    const thread = threads.find(t => t.id === threadId);
+    if (!thread || !text.trim()) return;
+
+    thread.messages.push({
+      id: "m" + messageCounter++,
+      role: "user",
+      content: text.trim()
+    });
+
     render();
+    keepThreadScrolledToBottom(threadId);
+    sendToBackend(thread);
+  }
+
+  async function sendToBackend(thread) {
+    const payloadMessages = thread.messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
+    const thinking = {
+      id: "m" + messageCounter++,
+      role: "assistant",
+      content: "…"
+    };
+    thread.messages.push(thinking);
+    render();
+    keepThreadScrolledToBottom(thread.id);
 
     try {
       const resp = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          thread_id: THREAD_ID,
-          message: text
+          thread_id: thread.id,
+          messages: payloadMessages
         })
       });
 
       const data = await resp.json();
-      messages.push({ role: "assistant", content: data.reply });
+      thinking.content = data.reply ?? "(no reply)";
       render();
+      keepThreadScrolledToBottom(thread.id);
     } catch (err) {
-      messages.push({ role: "assistant", content: "Error: " + err });
+      thinking.content = "Error: " + err;
       render();
+      keepThreadScrolledToBottom(thread.id);
     }
   }
 
-  sendBtn.addEventListener("click", sendMessage);
-  inputEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendMessage();
+  // ---------- Selection / branching ----------
+
+  function clearSelection() {
+    const sel = window.getSelection && window.getSelection();
+    if (sel && sel.removeAllRanges) sel.removeAllRanges();
+  }
+
+  function getSelectedTextInside(el) {
+    const sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return null;
+
+    const text = sel.toString().trim();
+    return text.length ? text : null;
+  }
+
+  // Build a richer snippet: paragraph + selection + bit of the rest
+  function buildContextSnippet(msg, selectedText) {
+    const full = msg.content || "";
+    const s = selectedText || "";
+
+    if (!s) {
+      // no selection: just truncate whole message
+      return full.slice(0, 1000);
+    }
+
+    const idx = full.indexOf(s);
+    if (idx === -1) {
+      return full.slice(0, 1000);
+    }
+
+    // paragraph boundaries (split by blank line)
+    const before = full.lastIndexOf("\n\n", idx);
+    const after = full.indexOf("\n\n", idx + s.length);
+    const paraStart = before === -1 ? 0 : before + 2;
+    const paraEnd = after === -1 ? full.length : after;
+    const paragraph = full.slice(paraStart, paraEnd).trim();
+
+    // rest of text outside this paragraph
+    const rest = (full.slice(0, paraStart) + "\n" + full.slice(paraEnd)).trim();
+    const restTrunc = rest.slice(0, 400);
+
+    let snippet = "";
+    snippet += `Paragraph context:\n"${paragraph}"\n\n`;
+    snippet += `Focused selection:\n"${s}"\n\n`;
+    if (restTrunc.length) {
+      snippet += `Other context from the same answer (truncated):\n"${restTrunc}"`;
+    }
+    return snippet;
+  }
+
+  function branchFromMessage(parentThreadId, messageId, msgElement, forcedSnippet = null) {
+    const parentThread = threads.find(t => t.id === parentThreadId);
+    if (!parentThread) return;
+
+    const msg = parentThread.messages.find(m => m.id === messageId);
+    if (!msg) return;
+
+    const selected = getSelectedTextInside(msgElement);
+    let snippet;
+
+    if (forcedSnippet) {
+      snippet = forcedSnippet;
+    } else {
+      snippet = buildContextSnippet(msg, selected);
+    }
+
+    const newDepth = parentThread.depth + 1;
+
+    const childThread = createThread({
+      title: `Branch of ${parentThread.id}`,
+      depth: newDepth,
+      parentId: parentThread.id,
+      parentSnippet: snippet
+    });
+
+    if (!msg.highlights) msg.highlights = [];
+    msg.highlights.push({
+      id: "h" + highlightCounter++,
+      text: selected || snippet.slice(0, 120),
+      targetThreadId: childThread.id
+    });
+
+    activeThreadId = childThread.id;
+    pendingFocusThreadId = childThread.id;  // ask render() to focus input
+    render();
+    scrollToRight();
+  }
+
+  document.addEventListener("selectionchange", () => {
+    const sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      selectionBranchBtn.style.display = "none";
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+
+    const msgEl = container.nodeType === 1
+      ? container.closest(".msg.assistant")
+      : container.parentElement && container.parentElement.closest(".msg.assistant");
+
+    if (!msgEl) {
+      selectionBranchBtn.style.display = "none";
+      return;
+    }
+
+    const threadEl = msgEl.closest(".thread");
+    if (!threadEl) {
+      selectionBranchBtn.style.display = "none";
+      return;
+    }
+
+    const selectedText = sel.toString().trim();
+    if (!selectedText.length) {
+      selectionBranchBtn.style.display = "none";
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    selectionBranchBtn.style.display = "block";
+    selectionBranchBtn.style.left = (rect.left + rect.width / 2 - 50) + window.scrollX + "px";
+    selectionBranchBtn.style.top = (rect.top - 30) + window.scrollY + "px";
+
+    selectionBranchBtn.dataset.threadId = threadEl.dataset.threadId;
+    selectionBranchBtn.dataset.messageId = msgEl.dataset.messageId;
   });
 
+  selectionBranchBtn.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const threadId = selectionBranchBtn.dataset.threadId;
+    const messageId = selectionBranchBtn.dataset.messageId;
+
+    if (!threadId || !messageId) return;
+
+    const msgEl = document.querySelector(
+      `.thread[data-thread-id="${threadId}"] .msg[data-message-id="${messageId}"]`
+    );
+    if (!msgEl) return;
+
+    branchFromMessage(threadId, messageId, msgEl);
+    selectionBranchBtn.style.display = "none";
+    clearSelection();
+  });
+
+  // ---------- Layout: vertical staggering ----------
+
+  function computeVerticalOffsets() {
+    const byDepth = new Map();
+    for (const t of threads) {
+      if (!byDepth.has(t.depth)) byDepth.set(t.depth, []);
+      byDepth.get(t.depth).push(t);
+    }
+
+    const offsets = new Map();
+
+    for (const [depth, list] of byDepth.entries()) {
+      list.sort((a, b) => (a.parentId || "").localeCompare(b.parentId || ""));
+      const base = -((list.length - 1) * 20);
+      list.forEach((t, idx) => {
+        offsets.set(t.id, base + idx * 40);
+      });
+    }
+
+    return offsets;
+  }
+
+  // ---------- Rendering ----------
+  const newRootBtn = document.getElementById("new-root-btn");
+
+  newRootBtn.onclick = () => {
+    const t = createThread({
+      title: "Root " + threadCounter,
+      depth: 0,
+      parentId: null,
+      parentSnippet: null
+    });
+    activeThreadId = t.id;
+    pendingFocusThreadId = t.id;
+    render();
+    scrollToRight();
+  };
+
+  function renderMessageText(msg, container) {
+    if (!msg.highlights || msg.highlights.length === 0) {
+      container.textContent = msg.content;
+      return;
+    }
+
+    let text = msg.content;
+    let cursor = 0;
+    const highlights = msg.highlights.slice();
+
+    for (const h of highlights) {
+      const idx = text.indexOf(h.text, cursor);
+      if (idx === -1) continue;
+
+      if (idx > cursor) {
+        const before = text.slice(cursor, idx);
+        container.appendChild(document.createTextNode(before));
+      }
+
+      const span = document.createElement("span");
+      span.className = "branch-highlight";
+      span.dataset.highlightId = h.id;
+      span.textContent = h.text;
+      container.appendChild(span);
+
+      cursor = idx + h.text.length;
+    }
+
+    if (cursor < text.length) {
+      const after = text.slice(cursor);
+      container.appendChild(document.createTextNode(after));
+    }
+  }
+
+  function render() {
+    containerEl.innerHTML = "";
+
+    if (threads.length === 0) return;
+    if (!activeThreadId && threads.length > 0) {
+      activeThreadId = threads[0].id;
+    }
+
+    const offsets = computeVerticalOffsets();
+    const depths = [...new Set(threads.map(t => t.depth))].sort((a, b) => a - b);
+
+    for (const depth of depths) {
+      const col = document.createElement("div");
+      col.className = "depth-column";
+      col.dataset.depth = depth;
+
+      const label = document.createElement("div");
+      label.className = "depth-label";
+      label.textContent = depth === 0
+        ? "Depth 0 (Genesis)"
+        : `Depth ${depth} (branches of depth ${depth - 1})`;
+      col.appendChild(label);
+
+      const threadsForDepth = threads.filter(t => t.depth === depth);
+
+      for (const thread of threadsForDepth) {
+        const threadEl = document.createElement("div");
+        threadEl.className = "thread";
+        threadEl.dataset.threadId = thread.id;
+
+        const offset = offsets.get(thread.id) || 0;
+        threadEl.style.setProperty("--y-offset", offset + "px");
+
+        if (thread.id === activeThreadId) {
+          threadEl.classList.add("active");
+        } else {
+          threadEl.classList.add("collapsed");
+        }
+
+        const headerEl = document.createElement("div");
+        headerEl.className = "thread-header";
+        headerEl.addEventListener("click", () => setActiveThread(thread.id));
+
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "thread-title";
+        titleSpan.textContent = thread.title;
+
+        const metaSpan = document.createElement("span");
+        metaSpan.className = "thread-meta";
+        metaSpan.innerHTML = `<span class="badge">${thread.id}</span>` +
+          (thread.parentId ? ` ← <span class="badge">${thread.parentId}</span>` : "");
+
+        headerEl.appendChild(titleSpan);
+        headerEl.appendChild(metaSpan);
+        threadEl.appendChild(headerEl);
+
+        const bodyEl = document.createElement("div");
+        bodyEl.className = "thread-body";
+
+        for (const msg of thread.messages) {
+          const msgEl = document.createElement("div");
+          msgEl.className = "msg " + msg.role;
+          msgEl.dataset.messageId = msg.id;
+
+          const metaEl = document.createElement("div");
+          metaEl.className = "msg-meta";
+
+          const roleSpan = document.createElement("span");
+          roleSpan.className = "msg-role";
+          roleSpan.textContent = msg.role;
+          metaEl.appendChild(roleSpan);
+
+          msgEl.appendChild(metaEl);
+
+          const textEl = document.createElement("div");
+          textEl.className = "msg-text";
+          renderMessageText(msg, textEl);
+
+          msgEl.appendChild(textEl);
+          bodyEl.appendChild(msgEl);
+        }
+
+        threadEl.appendChild(bodyEl);
+
+        const footerEl = document.createElement("div");
+        footerEl.className = "thread-footer";
+
+        const inputEl = document.createElement("input");
+        inputEl.type = "text";
+        inputEl.placeholder = `Type in ${thread.id}…`;
+
+        inputEl.addEventListener("focus", () => {
+          if (activeThreadId === thread.id) return;
+
+          const prevActive = document.querySelector(".thread.active");
+          if (prevActive) {
+            prevActive.classList.remove("active");
+            prevActive.classList.add("collapsed");
+          }
+
+          const current = inputEl.closest(".thread");
+          if (current) {
+            current.classList.remove("collapsed");
+            current.classList.add("active");
+          }
+
+          activeThreadId = thread.id;
+        });
+
+        inputEl.onkeydown = (e) => {
+          if (e.key === "Enter") {
+            addUserMessage(thread.id, inputEl.value);
+            inputEl.value = "";
+          }
+        };
+
+        const sendBtn = document.createElement("button");
+        sendBtn.textContent = "Send";
+        sendBtn.onclick = () => {
+          addUserMessage(thread.id, inputEl.value);
+          inputEl.value = "";
+        };
+
+        footerEl.appendChild(inputEl);
+        footerEl.appendChild(sendBtn);
+        threadEl.appendChild(footerEl);
+
+        col.appendChild(threadEl);
+      }
+
+      containerEl.appendChild(col);
+    }
+
+    // keep all threads at the bottom
+    scrollAllThreadsToBottom();
+
+    // focus pending thread input on next tick
+    if (pendingFocusThreadId) {
+      const toFocus = pendingFocusThreadId;
+      pendingFocusThreadId = null;
+      setTimeout(() => {
+        focusInputForThread(toFocus);
+      }, 0);
+    }
+  }
+
+  function scrollToRight() {
+    containerEl.scrollLeft = containerEl.scrollWidth;
+  }
+
+  // ---------- Boot ----------
+  const first = createThread({
+    title: "Root 1",
+    depth: 0,
+    parentId: null,
+    parentSnippet: null
+  });
+  activeThreadId = first.id;
+  pendingFocusThreadId = first.id;
   render();
 </script>
 </body>
