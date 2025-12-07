@@ -12,7 +12,7 @@ from pydantic import BaseModel
 # CONFIG: local LLM connection (Ollama)
 # ---------------------------------------------------------
 OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "qwen3:14b"  # exact name from `ollama list`
+MODEL_NAME = "qwen2.5:7b"  # exact name from `ollama list`
 
 
 # ---------------------------------------------------------

@@ -47,15 +47,17 @@
       background: #222;
     }
 
+    /* MAIN CANVAS */
     #thread-container {
+      position: relative;
       flex: 1;
       display: flex;
       overflow-x: auto;
       overflow-y: auto;
-      padding: 12px 16px;
+      padding: 80px 16px 80px 16px;  /* breathing room */
       gap: 16px;
       scroll-behavior: smooth;
-      align-items: center;     /* center column groups vertically */
+      align-items: flex-start;
     }
 
     .depth-column {
@@ -63,7 +65,8 @@
       display: flex;
       flex-direction: column;
       gap: 24px;
-      justify-content: center;
+      justify-content: flex-start;
+      transform: translateY(0px); /* adjusted by JS */
     }
 
     .depth-label {
@@ -87,6 +90,7 @@
         max-height 0.15s ease,
         margin-top 0.2s ease;
       margin-top: var(--y-offset, 0px);
+      z-index: 1;                /* above connection lines */
     }
 
     .thread.active {
@@ -111,6 +115,7 @@
       background: #151515;
       border-radius: 10px 10px 0 0;
       cursor: pointer;
+      gap: 6px;
     }
 
     .thread-title {
@@ -120,6 +125,9 @@
     .thread-meta {
       font-size: 10px;
       opacity: 0.7;
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .thread-body {
@@ -161,7 +169,7 @@
     .msg.system {
       align-self: center;
       background: #111;
-      opacity: 0.8;
+      opacity: 0.9;
       font-size: 11px;
     }
 
@@ -225,6 +233,21 @@
       background: rgba(255, 255, 255, 0.04);
     }
 
+    .thread-close-btn {
+      border-radius: 999px;
+      padding: 2px 6px;
+      font-size: 11px;
+      line-height: 1;
+      border: 1px solid #444;
+      background: #151515;
+      color: #eee;
+      cursor: pointer;
+    }
+
+    .thread-close-btn:hover {
+      background: #222;
+    }
+
     #selection-branch-btn {
       position: absolute;
       z-index: 1000;
@@ -237,6 +260,23 @@
       cursor: pointer;
       display: none;
       box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    }
+
+    /* SVG LINES LAYER */
+
+    #connection-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: visible;
+      z-index: 0;
+    }
+
+    .thread-connection {
+      fill: none;
+      stroke: #4ade80;
+      stroke-width: 1.6;
+      opacity: 0.7;
     }
   </style>
 </head>
@@ -263,10 +303,18 @@
 
   function setActiveThread(id) {
     activeThreadId = id;
+    pendingFocusThreadId = id;  // focus its input after render
     render();
   }
 
-  function createThread({ title, depth, parentId = null, parentSnippet = null }) {
+  function createThread({
+    title,
+    depth,
+    parentId = null,
+    parentSnippet = null,
+    visibleSnippet = null,
+    branchSource = null   // { parentThreadId, parentMessageId, position }
+  }) {
     const id = "t" + threadCounter++;
 
     const messages = [];
@@ -275,12 +323,8 @@
       messages.push({
         id: "m" + messageCounter++,
         role: "system",
-        content:
-`You are continuing a new conversation that branches off a previous one.
-
-Parent thread: ${parentId}
-Context from the previous assistant message:
-${parentSnippet}`
+        content: parentSnippet,       // full hidden context for the model
+        visibleSnippet: visibleSnippet // short snippet we actually display
       });
     } else {
       messages.push({
@@ -290,7 +334,17 @@ ${parentSnippet}`
       });
     }
 
-    const thread = { id, depth, parentId, parentSnippet, title, messages };
+    const thread = {
+      id,
+      depth,
+      parentId,
+      parentSnippet,
+      title,
+      messages,
+      branchSource,        // where in the parent this came from
+      seq: threadCounter   // creation sequence as a tiebreaker
+    };
+
     threads.push(thread);
 
     if (!activeThreadId) activeThreadId = thread.id;
@@ -390,15 +444,62 @@ ${parentSnippet}`
     if (sel && sel.removeAllRanges) sel.removeAllRanges();
   }
 
+  // Return both raw and trimmed selection for better indexing + nicer display
   function getSelectedTextInside(el) {
     const sel = window.getSelection && window.getSelection();
-    if (!sel || sel.rangeCount === 0) return null;
+    if (!sel || sel.rangeCount === 0) return { raw: null, trimmed: null };
 
     const range = sel.getRangeAt(0);
-    if (!el.contains(range.commonAncestorContainer)) return null;
+    if (!el.contains(range.commonAncestorContainer)) {
+      return { raw: null, trimmed: null };
+    }
 
-    const text = sel.toString().trim();
-    return text.length ? text : null;
+    const raw = sel.toString();
+    const trimmed = raw.trim();
+
+    if (!trimmed.length) {
+      return { raw: null, trimmed: null };
+    }
+
+    return { raw, trimmed };
+  }
+
+  // Global mid-character index across conversation, with "round up for even length"
+  function computeGlobalSelectionMidIndex(parentThread, msg, rawSel, trimmedSel) {
+    const selText =
+      rawSel && rawSel.length
+        ? rawSel
+        : trimmedSel && trimmedSel.length
+        ? trimmedSel
+        : "";
+
+    let totalChars = 0;
+    let midGlobal = 0;
+
+    for (const m of parentThread.messages) {
+      const text = m.content || "";
+      if (m === msg) {
+        let idx = 0;
+        if (selText) {
+          const found = text.indexOf(selText);
+          if (found >= 0) idx = found;
+        }
+
+        const selLen = selText ? selText.length : 1;
+
+        let midInMsg;
+        if (selLen % 2 === 1) {
+          midInMsg = (selLen - 1) / 2;   // odd
+        } else {
+          midInMsg = selLen / 2;         // even, rounded up in 1-based terms
+        }
+
+        midGlobal = totalChars + idx + midInMsg;
+      }
+      totalChars += text.length;
+    }
+
+    return midGlobal;
   }
 
   // Build a richer snippet: paragraph + selection + bit of the rest
@@ -407,7 +508,6 @@ ${parentSnippet}`
     const s = selectedText || "";
 
     if (!s) {
-      // no selection: just truncate whole message
       return full.slice(0, 1000);
     }
 
@@ -416,14 +516,12 @@ ${parentSnippet}`
       return full.slice(0, 1000);
     }
 
-    // paragraph boundaries (split by blank line)
     const before = full.lastIndexOf("\n\n", idx);
     const after = full.indexOf("\n\n", idx + s.length);
     const paraStart = before === -1 ? 0 : before + 2;
     const paraEnd = after === -1 ? full.length : after;
     const paragraph = full.slice(paraStart, paraEnd).trim();
 
-    // rest of text outside this paragraph
     const rest = (full.slice(0, paraStart) + "\n" + full.slice(paraEnd)).trim();
     const restTrunc = rest.slice(0, 400);
 
@@ -436,6 +534,7 @@ ${parentSnippet}`
     return snippet;
   }
 
+  // Create branch node; ordering based on global mid-character index
   function branchFromMessage(parentThreadId, messageId, msgElement, forcedSnippet = null) {
     const parentThread = threads.find(t => t.id === parentThreadId);
     if (!parentThread) return;
@@ -443,37 +542,54 @@ ${parentSnippet}`
     const msg = parentThread.messages.find(m => m.id === messageId);
     if (!msg) return;
 
-    const selected = getSelectedTextInside(msgElement);
-    let snippet;
+    const selInfo = getSelectedTextInside(msgElement);
+    const rawSel = selInfo.raw;
+    const trimmedSel = selInfo.trimmed;
 
+    const globalMid = computeGlobalSelectionMidIndex(
+      parentThread,
+      msg,
+      rawSel,
+      trimmedSel
+    );
+
+    let snippet;
     if (forcedSnippet) {
       snippet = forcedSnippet;
     } else {
-      snippet = buildContextSnippet(msg, selected);
+      snippet = buildContextSnippet(msg, trimmedSel);
     }
 
     const newDepth = parentThread.depth + 1;
+    const visibleSnippet = trimmedSel || snippet.slice(0, 120);
 
     const childThread = createThread({
       title: `Branch of ${parentThread.id}`,
       depth: newDepth,
       parentId: parentThread.id,
-      parentSnippet: snippet
+      parentSnippet: snippet,
+      visibleSnippet,
+      branchSource: {
+        parentThreadId: parentThread.id,
+        parentMessageId: msg.id,
+        position: globalMid
+      }
     });
 
     if (!msg.highlights) msg.highlights = [];
     msg.highlights.push({
       id: "h" + highlightCounter++,
-      text: selected || snippet.slice(0, 120),
+      text: visibleSnippet,
       targetThreadId: childThread.id
     });
 
     activeThreadId = childThread.id;
-    pendingFocusThreadId = childThread.id;  // ask render() to focus input
+    pendingFocusThreadId = childThread.id;
     render();
     scrollToRight();
   }
 
+  // Selection can come from ANY message
   document.addEventListener("selectionchange", () => {
     const sel = window.getSelection && window.getSelection();
     if (!sel || sel.rangeCount === 0) {
@@ -485,8 +601,8 @@ ${parentSnippet}`
     const container = range.commonAncestorContainer;
 
     const msgEl = container.nodeType === 1
-      ? container.closest(".msg.assistant")
-      : container.parentElement && container.parentElement.closest(".msg.assistant");
+      ? container.closest(".msg")
+      : container.parentElement && container.parentElement.closest(".msg");
 
     if (!msgEl) {
       selectionBranchBtn.style.display = "none";
@@ -531,9 +647,49 @@ ${parentSnippet}`
     clearSelection();
   });
 
-  // ---------- Layout: vertical staggering ----------
+  // ---------- Close thread (and all descendants) ----------
 
-  function computeVerticalOffsets() {
+  function closeThread(threadId) {
+    const toDelete = new Set([threadId]);
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const t of threads) {
+        if (!toDelete.has(t.id) && t.parentId && toDelete.has(t.parentId)) {
+          toDelete.add(t.id);
+          changed = true;
+        }
+      }
+    }
+
+    threads.forEach(t => {
+      t.messages.forEach(m => {
+        if (m.highlights) {
+          m.highlights = m.highlights.filter(
+            h => !toDelete.has(h.targetThreadId)
+          );
+        }
+      });
+    });
+
+    for (let i = threads.length - 1; i >= 0; i--) {
+      if (toDelete.has(threads[i].id)) {
+        threads.splice(i, 1);
+      }
+    }
+
+    if (toDelete.has(activeThreadId)) {
+      activeThreadId = threads.length ? threads[0].id : null;
+    }
+
+    pendingFocusThreadId = activeThreadId;
+    render();
+  }
+
+  // ---------- Layout: vertical offsets + explicit order per depth ----------
+
+  function computeVerticalLayout() {
     const byDepth = new Map();
     for (const t of threads) {
       if (!byDepth.has(t.depth)) byDepth.set(t.depth, []);
@@ -541,16 +697,228 @@ ${parentSnippet}`
     }
 
     const offsets = new Map();
+    const order = new Map();   // depth-local ordering index for render()
+    const rowGap = 14;
 
-    for (const [depth, list] of byDepth.entries()) {
-      list.sort((a, b) => (a.parentId || "").localeCompare(b.parentId || ""));
-      const base = -((list.length - 1) * 20);
-      list.forEach((t, idx) => {
-        offsets.set(t.id, base + idx * 40);
+    const depthKeys = [...byDepth.keys()].sort((a, b) => a - b);
+
+    for (const depth of depthKeys) {
+      const list = byDepth.get(depth);
+      if (!list || list.length === 0) continue;
+
+      let localRank = 0;
+
+      if (depth === 0) {
+        // Roots: simple stack
+        list.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+        list.forEach((t, idx) => {
+          offsets.set(t.id, idx * rowGap);
+          order.set(t.id, localRank++);
+        });
+        continue;
+      }
+
+      // Depth > 0: group by parent, center around parent, avoid overlap
+      const groupsMap = new Map();
+      for (const t of list) {
+        const pid = t.parentId || "__no_parent__";
+        if (!groupsMap.has(pid)) groupsMap.set(pid, []);
+        groupsMap.get(pid).push(t);
+      }
+
+      const groups = [];
+
+      for (const [pid, children] of groupsMap.entries()) {
+        // children order inside a parent group is by highlight position
+        children.sort((a, b) => {
+          const aPos =
+            a.branchSource && a.branchSource.position != null
+              ? a.branchSource.position
+              : Infinity;
+          const bPos =
+            b.branchSource && b.branchSource.position != null
+              ? b.branchSource.position
+              : Infinity;
+
+          if (aPos !== bPos) return aPos - bPos;
+          return (a.seq || 0) - (b.seq || 0);
+        });
+
+        let parentIndex = null;
+        if (pid !== "__no_parent__" && offsets.has(pid)) {
+          parentIndex = (offsets.get(pid) || 0) / rowGap;
+        }
+
+        const n = children.length;
+        const indices = [];
+
+        if (parentIndex != null) {
+          const start = parentIndex - (n - 1) / 2;
+          for (let i = 0; i < n; i++) {
+            indices.push(start + i);
+          }
+        } else {
+          for (let i = 0; i < n; i++) indices.push(i);
+        }
+
+        let minIndex = Math.min(...indices);
+        let maxIndex = Math.max(...indices);
+
+        groups.push({
+          parentId: pid,
+          children,
+          indices,
+          minIndex,
+          maxIndex,
+          parentIndex
+        });
+      }
+
+      groups.sort((a, b) => {
+        const aKey = a.parentIndex != null ? a.parentIndex : a.minIndex;
+        const bKey = b.parentIndex != null ? b.parentIndex : b.minIndex;
+        return aKey - bKey;
       });
+
+      let currentFloor = 0;
+      for (const group of groups) {
+        if (group.minIndex < currentFloor) {
+          const delta = currentFloor - group.minIndex;
+          group.indices = group.indices.map(v => v + delta);
+          group.minIndex += delta;
+          group.maxIndex += delta;
+        }
+
+        group.children.forEach((child, idx) => {
+          const row = group.indices[idx];
+          offsets.set(child.id, row * rowGap);
+          order.set(child.id, localRank++);
+        });
+
+        currentFloor = group.maxIndex + 1;
+      }
     }
 
-    return offsets;
+    return { offsets, order };
+  }
+
+  // ---------- SVG CONNECTIONS ----------
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function ensureConnectionLayer() {
+    let svg = containerEl.querySelector("#connection-layer");
+    if (!svg) {
+      svg = document.createElementNS(SVG_NS, "svg");
+      svg.id = "connection-layer";
+      containerEl.prepend(svg);
+    }
+    const rect = containerEl.getBoundingClientRect();
+    svg.setAttribute("width", containerEl.scrollWidth);
+    svg.setAttribute("height", containerEl.scrollHeight);
+    svg.style.width = containerEl.scrollWidth + "px";
+    svg.style.height = containerEl.scrollHeight + "px";
+    svg.innerHTML = "";
+    return { svg, containerRect: rect };
+  }
+
+  function drawConnections() {
+    if (!threads.length) return;
+    const { svg, containerRect } = ensureConnectionLayer();
+
+    threads.forEach(thread => {
+      if (!thread.parentId) return;
+
+      const parentEl = containerEl.querySelector(
+        `.thread[data-thread-id="${thread.parentId}"]`
+      );
+      const childEl = containerEl.querySelector(
+        `.thread[data-thread-id="${thread.id}"]`
+      );
+      if (!parentEl || !childEl) return;
+
+      const pr = parentEl.getBoundingClientRect();
+      const cr = childEl.getBoundingClientRect();
+
+      const x1 = pr.right - containerRect.left;
+      const y1 = pr.top + pr.height / 2 - containerRect.top;
+      const x2 = cr.left - containerRect.left;
+      const y2 = cr.top + cr.height / 2 - containerRect.top;
+
+      const dx = (x2 - x1) * 0.5;
+
+      const path = document.createElementNS(SVG_NS, "path");
+      const d = `M ${x1} ${y1} C ${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
+      path.setAttribute("d", d);
+      path.setAttribute("class", "thread-connection");
+
+      svg.appendChild(path);
+    });
+  }
+
+  // ---------- Column centering relative to tallest column ----------
+
+  function centerColumnsByTallest() {
+    const cols = Array.from(containerEl.querySelectorAll(".depth-column"));
+    if (cols.length <= 1) {
+      drawConnections();
+      return;
+    }
+
+    const containerRect = containerEl.getBoundingClientRect();
+    const info = [];
+
+    let tallestIndex = -1;
+    let tallestHeight = 0;
+
+    cols.forEach((col, idx) => {
+      const threadsEls = Array.from(col.querySelectorAll(".thread"));
+      if (!threadsEls.length) {
+        info.push(null);
+        return;
+      }
+
+      let minTop = Infinity;
+      let maxBottom = -Infinity;
+
+      threadsEls.forEach(el => {
+        const r = el.getBoundingClientRect();
+        const top = r.top - containerRect.top;
+        const bottom = r.bottom - containerRect.top;
+        if (top < minTop) minTop = top;
+        if (bottom > maxBottom) maxBottom = bottom;
+      });
+
+      const height = maxBottom - minTop;
+      info.push({ minTop, maxBottom, height });
+
+      if (height > tallestHeight) {
+        tallestHeight = height;
+        tallestIndex = idx;
+      }
+    });
+
+    if (tallestIndex === -1) {
+      drawConnections();
+      return;
+    }
+
+    const tallest = info[tallestIndex];
+    const targetCenter = (tallest.minTop + tallest.maxBottom) / 2;
+
+    cols.forEach((col, idx) => {
+      const meta = info[idx];
+      if (!meta) {
+        col.style.transform = "translateY(0px)";
+        return;
+      }
+      const center = (meta.minTop + meta.maxBottom) / 2;
+      const delta = targetCenter - center;
+
+      col.style.transform = `translateY(${delta}px)`;
+    });
+
+    drawConnections();
   }
 
   // ---------- Rendering ----------
@@ -570,12 +938,16 @@ ${parentSnippet}`
   };
 
   function renderMessageText(msg, container) {
+    const baseText = msg.visibleSnippet
+      ? `Branch context: "${msg.visibleSnippet}"`
+      : msg.content;
+
     if (!msg.highlights || msg.highlights.length === 0) {
-      container.textContent = msg.content;
+      container.textContent = baseText;
       return;
     }
 
-    let text = msg.content;
+    let text = baseText;
     let cursor = 0;
     const highlights = msg.highlights.slice();
 
@@ -611,8 +983,10 @@ ${parentSnippet}`
       activeThreadId = threads[0].id;
     }
 
-    const offsets = computeVerticalOffsets();
+    const { offsets, order } = computeVerticalLayout();
     const depths = [...new Set(threads.map(t => t.depth))].sort((a, b) => a - b);
+
+    ensureConnectionLayer();
 
     for (const depth of depths) {
       const col = document.createElement("div");
@@ -626,12 +1000,30 @@ ${parentSnippet}`
         : `Depth ${depth} (branches of depth ${depth - 1})`;
       col.appendChild(label);
 
-      const threadsForDepth = threads.filter(t => t.depth === depth);
+      let threadsForDepth = threads.filter(t => t.depth === depth);
+
+      // IMPORTANT: sort DOM order by computed vertical order
+      threadsForDepth.sort((a, b) => {
+        const oa = order.get(a.id) ?? 0;
+        const ob = order.get(b.id) ?? 0;
+        return oa - ob;
+      });
 
       for (const thread of threadsForDepth) {
         const threadEl = document.createElement("div");
         threadEl.className = "thread";
         threadEl.dataset.threadId = thread.id;
+
+        threadEl.addEventListener("click", (e) => {
+          const sel = window.getSelection && window.getSelection();
+          if (sel && sel.toString().trim()) {
+            return;
+          }
+          if (e.target.closest("input") || e.target.closest("button")) {
+            return;
+          }
+          setActiveThread(thread.id);
+        });
 
         const offset = offsets.get(thread.id) || 0;
         threadEl.style.setProperty("--y-offset", offset + "px");
@@ -644,7 +1036,6 @@ ${parentSnippet}`
 
         const headerEl = document.createElement("div");
         headerEl.className = "thread-header";
-        headerEl.addEventListener("click", () => setActiveThread(thread.id));
 
         const titleSpan = document.createElement("span");
         titleSpan.className = "thread-title";
@@ -655,8 +1046,20 @@ ${parentSnippet}`
         metaSpan.innerHTML = `<span class="badge">${thread.id}</span>` +
           (thread.parentId ? ` ← <span class="badge">${thread.parentId}</span>` : "");
 
+        const closeBtn = document.createElement("button");
+        closeBtn.className = "thread-close-btn";
+        closeBtn.textContent = "×";
+        closeBtn.title = "Close this node and its branches";
+        closeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closeThread(thread.id);
+        });
+
         headerEl.appendChild(titleSpan);
         headerEl.appendChild(metaSpan);
+        headerEl.appendChild(closeBtn);
+
+        headerEl.addEventListener("click", () => setActiveThread(thread.id));
         threadEl.appendChild(headerEl);
 
         const bodyEl = document.createElement("div");
@@ -736,17 +1139,17 @@ ${parentSnippet}`
       containerEl.appendChild(col);
     }
 
-    // keep all threads at the bottom
     scrollAllThreadsToBottom();
 
-    // focus pending thread input on next tick
     if (pendingFocusThreadId) {
       const toFocus = pendingFocusThreadId;
       pendingFocusThreadId = null;
       setTimeout(() => {
-        focusInputForThread(toFocus);
+        if (toFocus) focusInputForThread(toFocus);
       }, 0);
     }
+
+    requestAnimationFrame(centerColumnsByTallest);
   }
 
   function scrollToRight() {
