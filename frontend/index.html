@@ -7,6 +7,7 @@
     :root {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color-scheme: dark;
+      --thread-width: 340px;
     }
 
     body {
@@ -36,7 +37,25 @@
 
     .header-actions {
       display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header-buttons {
+      display: flex;
       gap: 8px;
+    }
+
+    .width-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #aaa;
+    }
+
+    .width-control input[type="range"] {
+      width: 140px;
     }
 
     header button {
@@ -65,7 +84,7 @@
 
     .thread {
       position: absolute;
-      width: 340px;
+      width: var(--thread-width);
       display: flex;
       flex-direction: column;
       background: #101010;
@@ -99,8 +118,12 @@
       align-items: center;
       background: #151515;
       border-radius: 10px 10px 0 0;
-      cursor: pointer;
+      cursor: grab;
       gap: 6px;
+    }
+
+    .thread-header.dragging {
+      cursor: grabbing;
     }
 
     .thread-title {
@@ -258,8 +281,21 @@
 <header>
   <h1>Branching Chat (Columns by Depth)</h1>
   <div class="header-actions">
-    <button id="refresh-layout-btn">↻ Refresh layout</button>
-    <button id="new-root-btn">+ New root conversation</button>
+    <div class="width-control">
+      <span>Width</span>
+      <input
+        type="range"
+        id="width-slider"
+        min="260"
+        max="640"
+        value="340"
+      />
+      <span id="width-label">340px</span>
+    </div>
+    <div class="header-buttons">
+      <button id="refresh-layout-btn">↻ Refresh layout</button>
+      <button id="new-root-btn">+ New root conversation</button>
+    </div>
   </div>
 </header>
 
@@ -267,27 +303,40 @@
 <button id="selection-branch-btn">Branch selection →</button>
 
 <script>
-  // ---------- Data ----------
+  // ---------- Global data ----------
   let threadCounter = 1;
   let messageCounter = 1;
   let highlightCounter = 1;
   let activeThreadId = null;
   let pendingFocusThreadId = null;
 
-  const threads = [];
+  const threads = [];   // {id, depth, parentId, title, messages, branchSource, prefY, y, manual, createdAt}
 
-  const COLUMN_WIDTH = 360;
+  let THREAD_WIDTH = 340;
+  const COLUMN_GAP = 20;
   const MIN_VERTICAL_GAP = 14;
+  const ROOT_GAP = 40;
   const TOP_MARGIN = 40;
 
   const containerEl = document.getElementById("thread-container");
   const selectionBranchBtn = document.getElementById("selection-branch-btn");
   const newRootBtn = document.getElementById("new-root-btn");
   const refreshBtn = document.getElementById("refresh-layout-btn");
+  const widthSlider = document.getElementById("width-slider");
+  const widthLabel = document.getElementById("width-label");
 
-  // last branched child to anchor in its lane
-  let anchoredThreadId = null;
+  // drag state
+  let dragState = null;
 
+  function getColumnLeft(depth) {
+    return depth * (THREAD_WIDTH + COLUMN_GAP);
+  }
+
+  function getThread(id) {
+    return threads.find(t => t.id === id);
+  }
+
+  // ---------- Core helpers ----------
   function setActiveThread(id) {
     activeThreadId = id;
     pendingFocusThreadId = id;
@@ -304,6 +353,7 @@
     y = null
   }) {
     const id = "t" + threadCounter++;
+    const createdAt = Date.now() + Math.random();
 
     const messages = [];
 
@@ -323,25 +373,20 @@
     }
 
     if (y === null) {
-      if (depth === 0) {
-        const existingRoots = threads.filter(t => t.depth === 0).length;
-        y = TOP_MARGIN + existingRoots * 260;
-      } else {
-        y = TOP_MARGIN;
-      }
+      y = TOP_MARGIN;
     }
 
     const thread = {
       id,
       depth,
       parentId,
-      parentSnippet,
       title,
       messages,
-      branchSource,
-      seq: threadCounter,
-      baseY: y,   // ideal top (content-space)
-      y           // actual top (content-space)
+      branchSource, // { parentThreadId, parentMessageId, anchorFrac }
+      createdAt,
+      manual: false,
+      prefY: y,
+      y
     };
 
     threads.push(thread);
@@ -349,7 +394,6 @@
     return thread;
   }
 
-  // ---------- Helpers ----------
   function keepThreadScrolledToBottom(threadId) {
     const threadEl = [...document.querySelectorAll(".thread")]
       .find(el => el.dataset.threadId === threadId);
@@ -378,7 +422,7 @@
 
   // ---------- Messaging ----------
   function addUserMessage(threadId, text) {
-    const thread = threads.find(t => t.id === threadId);
+    const thread = getThread(threadId);
     if (!thread || !text.trim()) return;
 
     thread.messages.push({
@@ -388,7 +432,6 @@
     });
 
     pendingFocusThreadId = threadId;
-
     render();
     keepThreadScrolledToBottom(threadId);
     sendToBackend(thread);
@@ -518,7 +561,7 @@
   }
 
   function branchFromMessage(parentThreadId, messageId, msgElement, forcedSnippet = null) {
-    const parentThread = threads.find(t => t.id === parentThreadId);
+    const parentThread = getThread(parentThreadId);
     if (!parentThread) return;
 
     const msg = parentThread.messages.find(m => m.id === messageId);
@@ -535,20 +578,20 @@
       trimmedSel
     );
 
-    // Highlight center in global canvas coords
-    let highlightYGlobal = parentThread.y ?? parentThread.baseY ?? TOP_MARGIN;
+    // compute anchorFrac (0..1) inside parent card from DOM
+    let anchorFrac = 0.5;
 
     const sel = window.getSelection && window.getSelection();
     if (sel && sel.rangeCount > 0) {
       const range = sel.getRangeAt(0);
       const highlightRect = range.getBoundingClientRect();
-      const containerRect = containerEl.getBoundingClientRect();
-      const scrollTop = containerEl.scrollTop;
-
-      highlightYGlobal =
-        highlightRect.top + highlightRect.height / 2
-        - containerRect.top
-        + scrollTop;
+      const threadEl = msgElement.closest(".thread");
+      if (threadEl) {
+        const tr = threadEl.getBoundingClientRect();
+        const parentHeight = tr.height || 1;
+        const centerInsideParent = highlightRect.top + highlightRect.height / 2 - tr.top;
+        anchorFrac = Math.min(1, Math.max(0, centerInsideParent / parentHeight));
+      }
     }
 
     const snippet = forcedSnippet || buildContextSnippet(msg, trimmedSel);
@@ -564,13 +607,10 @@
       branchSource: {
         parentThreadId: parentThread.id,
         parentMessageId: msg.id,
-        position: globalMid,
-        highlightY: highlightYGlobal   // store exact highlight center
-      },
-      y: highlightYGlobal // provisional; will be recentered by layout using card height
+        globalPosition: globalMid,
+        anchorFrac
+      }
     });
-
-    anchoredThreadId = childThread.id;
 
     if (!msg.highlights) msg.highlights = [];
     msg.highlights.push({
@@ -753,145 +793,221 @@
     containerEl.scrollLeft = containerEl.scrollWidth;
   }
 
-  // ---------- Recompute baseY from DOM for all children (refresh) ----------
-  function recomputeBasePositionsFromDOM() {
-    const containerRect = containerEl.getBoundingClientRect();
-    const scrollTop = containerEl.scrollTop;
-
-    // keep roots' current y as base
-    threads.forEach(t => {
-      if (t.depth === 0 && typeof t.y === "number") {
-        t.baseY = t.y;
-      }
-    });
-
-    for (const child of threads) {
-      if (!child.parentId) continue;
-
-      const parentEl = containerEl.querySelector(
-        `.thread[data-thread-id="${child.parentId}"]`
-      );
-      if (!parentEl) continue;
-
-      const highlightSpan = parentEl.querySelector(
-        `.branch-highlight[data-target-thread-id="${child.id}"]`
-      );
-      if (!highlightSpan) continue;
-
-      const hr = highlightSpan.getBoundingClientRect();
-      const highlightCenterGlobal =
-        hr.top + hr.height / 2 - containerRect.top + scrollTop;
-
-      const childEl = containerEl.querySelector(
-        `.thread[data-thread-id="${child.id}"]`
-      );
-      const h = childEl ? (childEl.offsetHeight || 200) : 200;
-
-      child.branchSource = child.branchSource || {};
-      child.branchSource.highlightY = highlightCenterGlobal;
-      child.baseY = highlightCenterGlobal - h / 2;
-    }
-  }
-
-  // ---------- Depth lane layout ----------
-  function applyDepthLayout(centerByParents = false) {
+  // ---------- Layout engine ----------
+  function layout(options = {}) {
     if (!threads.length) return;
+    if (dragState) return; // don't fight user while dragging
 
-    const depths = Array.from(new Set(threads.map(t => t.depth)));
+    const { centerParents = false } = options;
 
-    depths.forEach(depth => {
-      const laneThreads = threads
-        .filter(t => t.depth === depth)
-        .sort((a, b) => (a.baseY ?? a.y) - (b.baseY ?? b.y));
-
-      if (!laneThreads.length) return;
-
-      const n = laneThreads.length;
-
-      const heights = laneThreads.map(t => {
-        const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-        return el ? (el.offsetHeight || 200) : 200;
-      });
-
-      const basePos = laneThreads.map(t => t.baseY ?? t.y ?? TOP_MARGIN);
-
-      // Make anchor child’s ideal pos = highlight center - half its height
-      let anchorIndex = laneThreads.findIndex(t => t.id === anchoredThreadId);
-
-      if (centerByParents) {
-        // on full refresh: use all stored highlight centers if present
-        laneThreads.forEach((t, idx) => {
-          if (t.branchSource && typeof t.branchSource.highlightY === "number") {
-            basePos[idx] = t.branchSource.highlightY - heights[idx] / 2;
-          }
-        });
-        anchorIndex = -1; // no special anchor
-      } else if (anchorIndex !== -1) {
-        const t = laneThreads[anchorIndex];
-        if (t.branchSource && typeof t.branchSource.highlightY === "number") {
-          basePos[anchorIndex] = t.branchSource.highlightY - heights[anchorIndex] / 2;
-        }
-      }
-
-      const finalPos = new Array(n);
-
-      if (anchorIndex === -1) {
-        // simple downward collision from base
-        let lastBottom = -Infinity;
-        for (let i = 0; i < n; i++) {
-          let top = basePos[i];
-          if (top < lastBottom + MIN_VERTICAL_GAP) {
-            top = lastBottom + MIN_VERTICAL_GAP;
-          }
-          finalPos[i] = top;
-          lastBottom = top + heights[i];
-        }
-      } else {
-        // anchor new child, move siblings around it
-        finalPos[anchorIndex] = basePos[anchorIndex];
-
-        for (let i = anchorIndex - 1; i >= 0; i--) {
-          const belowTop = finalPos[i + 1] - MIN_VERTICAL_GAP - heights[i];
-          const desired = basePos[i];
-          finalPos[i] = Math.min(desired, belowTop);
-        }
-
-        for (let i = anchorIndex + 1; i < n; i++) {
-          const aboveBottom = finalPos[i - 1] + heights[i - 1] + MIN_VERTICAL_GAP;
-          const desired = basePos[i];
-          finalPos[i] = Math.max(desired, aboveBottom);
-        }
-      }
-
-      // (simple version) no parent-cluster centering yet; that will be the next evolution for your point (3)
-
-      laneThreads.forEach((thread, idx) => {
-        const top = finalPos[idx];
-        thread.y = top;
-        const el = containerEl.querySelector(`.thread[data-thread-id="${thread.id}"]`);
-        if (el) el.style.top = top + "px";
-      });
+    // measure heights
+    const heights = {};
+    threads.forEach(t => {
+      const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
+      heights[t.id] = el ? (el.offsetHeight || 200) : 200;
     });
 
-    anchoredThreadId = null;
+    // Step 1: roots preferred positions (if none yet)
+    const roots = threads
+      .filter(t => t.depth === 0)
+      .sort((a, b) => a.createdAt - b.createdAt);
 
-    // global re-base so highest card is at TOP_MARGIN
+    let currentRootY = TOP_MARGIN;
+    for (const r of roots) {
+      if (r.prefY == null) {
+        r.prefY = currentRootY;
+      }
+      currentRootY = r.prefY + (heights[r.id] || 200) + ROOT_GAP;
+    }
+
+    // Step 2: preferred positions for children (non-manual)
+    const maxDepth = Math.max(...threads.map(t => t.depth));
+    for (let d = 1; d <= maxDepth; d++) {
+      const lane = threads.filter(t => t.depth === d);
+      lane.forEach(t => {
+        if (t.manual) return;
+        const parent = getThread(t.parentId);
+        if (!parent) return;
+        const parentY = parent.y ?? parent.prefY ?? TOP_MARGIN;
+        const parentH = heights[parent.id] || 200;
+        const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
+          ? t.branchSource.anchorFrac
+          : 0.5;
+        const center = parentY + frac * parentH;
+        const h = heights[t.id] || 200;
+        t.prefY = center - h / 2;
+      });
+    }
+
+    // Step 3: pack each column (no overlaps, preserve order)
+    const depths = Array.from(new Set(threads.map(t => t.depth))).sort((a, b) => a - b);
+
+    depths.forEach(d => {
+      const lane = threads.filter(t => t.depth === d);
+
+      const sorted = lane.slice().sort((a, b) => {
+        function key(t) {
+          const parent = getThread(t.parentId);
+          const parentY = parent ? (parent.y ?? parent.prefY ?? 0) : (t.prefY ?? 0);
+          const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
+            ? t.branchSource.anchorFrac
+            : 0.5;
+          return { parentY, frac, createdAt: t.createdAt };
+        }
+        const ka = key(a);
+        const kb = key(b);
+        if (ka.parentY !== kb.parentY) return ka.parentY - kb.parentY;
+        if (ka.frac !== kb.frac) return ka.frac - kb.frac;
+        return ka.createdAt - kb.createdAt;
+      });
+
+      let prevBottom = -Infinity;
+      for (const t of sorted) {
+        const h = heights[t.id] || 200;
+        let cand = t.prefY ?? TOP_MARGIN;
+        if (cand < prevBottom + MIN_VERTICAL_GAP) {
+          cand = prevBottom + MIN_VERTICAL_GAP;
+        }
+        t.y = cand;
+        prevBottom = cand + h;
+
+        const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
+        if (el) el.style.top = `${cand}px`;
+      }
+    });
+
+    // Step 4: optional parent centering on refresh
+    if (centerParents) {
+      const childrenByParent = new Map();
+      threads.forEach(child => {
+        if (!child.parentId) return;
+        const pId = child.parentId;
+        const h = heights[child.id] || 200;
+        const top = child.y ?? child.prefY ?? TOP_MARGIN;
+        const bottom = top + h;
+        const existing = childrenByParent.get(pId);
+        if (!existing) {
+          childrenByParent.set(pId, { top, bottom });
+        } else {
+          existing.top = Math.min(existing.top, top);
+          existing.bottom = Math.max(existing.bottom, bottom);
+        }
+      });
+
+      childrenByParent.forEach((cluster, parentId) => {
+        const parent = getThread(parentId);
+        if (!parent || parent.manual) return;
+        const h = heights[parent.id] || 200;
+        const center = (cluster.top + cluster.bottom) / 2;
+        parent.prefY = center - h / 2;
+      });
+
+      // re-pack columns once using new parent prefYs
+      depths.forEach(d => {
+        const lane = threads.filter(t => t.depth === d);
+        const sorted = lane.slice().sort((a, b) => {
+          function key(t) {
+            const parent = getThread(t.parentId);
+            const parentY = parent ? (parent.y ?? parent.prefY ?? 0) : (t.prefY ?? 0);
+            const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
+              ? t.branchSource.anchorFrac
+              : 0.5;
+            return { parentY, frac, createdAt: t.createdAt };
+          }
+          const ka = key(a);
+          const kb = key(b);
+          if (ka.parentY !== kb.parentY) return ka.parentY - kb.parentY;
+          if (ka.frac !== kb.frac) return ka.frac - kb.frac;
+          return ka.createdAt - kb.createdAt;
+        });
+
+        let prevBottom = -Infinity;
+        for (const t of sorted) {
+          const h = heights[t.id] || 200;
+          let cand = t.prefY ?? TOP_MARGIN;
+          if (cand < prevBottom + MIN_VERTICAL_GAP) {
+            cand = prevBottom + MIN_VERTICAL_GAP;
+          }
+          t.y = cand;
+          prevBottom = cand + h;
+          const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
+          if (el) el.style.top = `${cand}px`;
+        }
+      });
+    }
+
+    // Step 5: global normalization so the topmost is at TOP_MARGIN
     let minY = Infinity;
     threads.forEach(t => {
       if (typeof t.y === "number" && t.y < minY) minY = t.y;
     });
-
-    if (minY === Infinity) return;
-
-    const shiftDown = TOP_MARGIN - minY;
-    if (shiftDown > 0) {
+    if (minY !== Infinity && minY !== TOP_MARGIN) {
+      const shift = TOP_MARGIN - minY;
       threads.forEach(t => {
-        t.y += shiftDown;
-        if (typeof t.baseY === "number") t.baseY += shiftDown;
+        t.y += shift;
+        if (typeof t.prefY === "number") t.prefY += shift;
         const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-        if (el) el.style.top = t.y + "px";
+        if (el) el.style.top = `${t.y}px`;
       });
     }
+  }
+
+  // ---------- Drag handlers ----------
+  function startDrag(thread, headerEl, e) {
+    if (e.button !== 0) return;
+    if (e.target.closest(".thread-close-btn")) return;
+
+    e.preventDefault();
+    dragState = {
+      threadId: thread.id,
+      startY: e.clientY,
+      originalTop: thread.y ?? thread.prefY ?? TOP_MARGIN
+    };
+    headerEl.classList.add("dragging");
+
+    document.addEventListener("mousemove", onDragMove);
+    document.addEventListener("mouseup", onDragEnd);
+  }
+
+  function onDragMove(e) {
+    if (!dragState) return;
+    const t = getThread(dragState.threadId);
+    if (!t) return;
+
+    const dy = e.clientY - dragState.startY;
+    const newTop = dragState.originalTop + dy;
+
+    t.y = newTop;
+    t.prefY = newTop;
+
+    const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
+    if (el) el.style.top = `${newTop}px`;
+
+    drawConnections();
+  }
+
+  function onDragEnd() {
+    if (!dragState) return;
+    const { threadId } = dragState;
+    const t = getThread(threadId);
+
+    const headerEl = containerEl.querySelector(
+      `.thread[data-thread-id="${threadId}"] .thread-header`
+    );
+    if (headerEl) headerEl.classList.remove("dragging");
+
+    document.removeEventListener("mousemove", onDragMove);
+    document.removeEventListener("mouseup", onDragEnd);
+
+    if (t) {
+      t.manual = true;
+      t.prefY = t.y;
+    }
+
+    dragState = null;
+
+    layout({ centerParents: false });
+    drawConnections();
   }
 
   // ---------- Rendering ----------
@@ -902,7 +1018,6 @@
       parentId: null,
       parentSnippet: null
     });
-    anchoredThreadId = null;
     activeThreadId = t.id;
     pendingFocusThreadId = t.id;
     render();
@@ -911,12 +1026,19 @@
 
   refreshBtn.onclick = () => {
     requestAnimationFrame(() => {
-      recomputeBasePositionsFromDOM();
-      anchoredThreadId = null;
-      applyDepthLayout(true);   // use highlight centers for all children
+      layout({ centerParents: true });
       drawConnections();
     });
   };
+
+  widthSlider.addEventListener("input", () => {
+    const v = parseInt(widthSlider.value, 10) || 340;
+    THREAD_WIDTH = v;
+    document.documentElement.style.setProperty("--thread-width", `${v}px`);
+    widthLabel.textContent = `${v}px`;
+    // Re-render so heights are re-measured and layout recalcs
+    render();
+  });
 
   function renderMessageText(msg, container) {
     const baseText = msg.visibleSnippet
@@ -980,10 +1102,10 @@
       threadEl.className = "thread";
       threadEl.dataset.threadId = thread.id;
 
-      const left = thread.depth * COLUMN_WIDTH;
-      const top = thread.y ?? thread.baseY ?? TOP_MARGIN;
-      threadEl.style.left = left + "px";
-      threadEl.style.top = top + "px";
+      const left = getColumnLeft(thread.depth);
+      const top = thread.y ?? thread.prefY ?? TOP_MARGIN;
+      threadEl.style.left = `${left}px`;
+      threadEl.style.top = `${top}px`;
 
       if (thread.id === activeThreadId) {
         threadEl.classList.add("active");
@@ -1021,7 +1143,10 @@
       headerEl.appendChild(titleSpan);
       headerEl.appendChild(metaSpan);
       headerEl.appendChild(closeBtn);
+
       headerEl.addEventListener("click", () => setActiveThread(thread.id));
+      headerEl.addEventListener("mousedown", (e) => startDrag(thread, headerEl, e));
+
       threadEl.appendChild(headerEl);
 
       const bodyEl = document.createElement("div");
@@ -1108,12 +1233,15 @@
         focusInputForThread(toFocus);
       }
 
-      applyDepthLayout(false);  // incremental layout
+      layout({ centerParents: false });
       drawConnections();
     });
   }
 
   // ---------- Boot ----------
+  document.documentElement.style.setProperty("--thread-width", `${THREAD_WIDTH}px`);
+  widthLabel.textContent = `${THREAD_WIDTH}px`;
+
   const first = createThread({
     title: "Root 1",
     depth: 0,
