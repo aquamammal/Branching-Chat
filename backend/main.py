@@ -1,10 +1,10 @@
 # backend/main.py
 
 from typing import List
+from pathlib import Path
 
 import requests
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -19,9 +19,6 @@ MODEL_NAME = "qwen2.5:7b"  # exact name from `ollama list`
 # FASTAPI APP
 # ---------------------------------------------------------
 app = FastAPI()
-
-# serve static assets from /frontend if needed later
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
 # ---------------------------------------------------------
@@ -40,11 +37,6 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     thread_id: str
     reply: str
-
-
-@app.get("/")
-def root():
-    return FileResponse("frontend/index.html")
 
 
 # ---------------------------------------------------------
@@ -77,9 +69,23 @@ def call_llm(messages: List[Message]) -> str:
 
 
 # ---------------------------------------------------------
-# API ROUTE
+# API ROUTE  (add THIS before mounting static files)
 # ---------------------------------------------------------
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     reply_text = call_llm(req.messages)
     return ChatResponse(thread_id=req.thread_id, reply=reply_text)
+
+
+# ---------------------------------------------------------
+# FRONTEND STATIC FILES (mount AFTER routes)
+# ---------------------------------------------------------
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+# This serves index.html at "/" and all JS files at:
+#   /main.js, /state.js, /layout.js, /ui.js
+app.mount(
+    "/",
+    StaticFiles(directory=FRONTEND_DIR, html=True),
+    name="frontend",
+)

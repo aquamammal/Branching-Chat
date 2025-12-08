@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Branching Chat – Absolute Position Engine</title>
+  <title>Branching Chat – Columns by Depth</title>
+
   <style>
     :root {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color-scheme: dark;
-      --thread-width: 340px;
     }
 
     body {
@@ -20,6 +20,7 @@
       height: 100vh;
     }
 
+    /* ---------------- HEADER ---------------- */
     header {
       padding: 10px 16px;
       background: #080808;
@@ -27,38 +28,24 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
     header h1 {
       font-size: 16px;
       margin: 0;
+      font-weight: 500;
     }
 
-    .header-actions {
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 12px;
-    }
-
-    .header-buttons {
-      display: flex;
       gap: 8px;
     }
 
-    .width-control {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      color: #aaa;
-    }
-
-    .width-control input[type="range"] {
-      width: 140px;
-    }
-
-    header button {
+    header button,
+    header select,
+    header input[type="range"] {
       border-radius: 999px;
       border: 1px solid #444;
       background: #151515;
@@ -72,6 +59,16 @@
       background: #222;
     }
 
+    .width-label {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    #width-slider {
+      cursor: pointer;
+    }
+
+    /* ---------------- MAIN THREAD AREA ---------------- */
     #thread-container {
       position: relative;
       flex: 1;
@@ -82,31 +79,23 @@
       background: #050505;
     }
 
+    /* ---------------- THREAD ---------------- */
     .thread {
       position: absolute;
-      width: var(--thread-width);
+      width: 340px;
       display: flex;
       flex-direction: column;
       background: #101010;
       border-radius: 10px;
       border: 1px solid #333;
       box-shadow: 0 0 12px rgba(0, 0, 0, 0.4);
-      transition:
-        border-color 0.15s ease,
-        box-shadow 0.15s ease,
-        opacity 0.15s ease;
-      z-index: 1;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      z-index: 2;
     }
 
     .thread.active {
       border-color: #4ade80;
       box-shadow: 0 0 18px rgba(74, 222, 128, 0.45);
-      opacity: 1;
-      z-index: 2;
-    }
-
-    .thread.collapsed {
-      opacity: 0.9;
     }
 
     .thread-header {
@@ -118,24 +107,16 @@
       align-items: center;
       background: #151515;
       border-radius: 10px 10px 0 0;
-      cursor: grab;
+      cursor: move;
       gap: 6px;
-    }
-
-    .thread-header.dragging {
-      cursor: grabbing;
     }
 
     .thread-title {
       font-weight: 500;
-    }
-
-    .thread-meta {
-      font-size: 10px;
-      opacity: 0.7;
-      display: flex;
-      align-items: center;
-      gap: 4px;
+      max-width: 210px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .thread-body {
@@ -144,7 +125,6 @@
       flex-direction: column;
       gap: 6px;
       overflow: visible;
-      flex: 0 0 auto;
     }
 
     .thread-footer {
@@ -156,54 +136,46 @@
       border-radius: 0 0 10px 10px;
     }
 
+    /* ---------------- MESSAGES ---------------- */
     .msg {
       padding: 6px 8px;
       border-radius: 8px;
       font-size: 13px;
-      position: relative;
-      white-space: pre-wrap;
+      max-width: 100%;
     }
 
-    .msg.user {
-      align-self: flex-end;
-      background: #24496e;
+    .msg.user { background: #24496e; align-self: flex-end; }
+    .msg.assistant { background: #262626; align-self: flex-start; }
+    .msg.system { background: #111; opacity: 0.9; font-size: 11px; align-self: center; }
+
+    .msg-text p { margin: 0 0 0.4rem 0; }
+    .msg-text ul, .msg-text ol {
+      margin: 0.4rem 0 0.4rem 1.2rem;
     }
 
-    .msg.assistant {
-      align-self: flex-start;
-      background: #262626;
+    .msg-text code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas;
+      background: rgba(0,0,0,0.35);
+      padding: 0.15em 0.3em;
+      border-radius: 4px;
     }
 
-    .msg.system {
-      align-self: center;
-      background: #111;
-      opacity: 0.9;
-      font-size: 11px;
-    }
-
-    .msg-meta {
-      font-size: 10px;
-      opacity: 0.7;
-      margin-bottom: 2px;
-      display: flex;
-      justify-content: space-between;
-      gap: 6px;
-    }
-
-    .msg-role {
-      text-transform: uppercase;
-    }
-
-    .msg-text {
-      font-size: 13px;
+    .msg-text pre {
+      padding: 0.75rem;
+      background: #050505;
+      border-radius: 6px;
+      overflow-x: auto;
+      border: 1px solid #333;
     }
 
     .branch-highlight {
       background: #2a7c52;
       padding: 0 2px;
       border-radius: 2px;
+      cursor: pointer;
     }
 
+    /* ---------------- INPUT ---------------- */
     input[type="text"] {
       flex: 1;
       padding: 6px 8px;
@@ -213,43 +185,15 @@
       color: #eee;
       font-size: 13px;
     }
-
     input[type="text"]:focus {
       outline: none;
       border-color: #555;
     }
 
-    button {
-      border: 1px solid #444;
-      background: #151515;
-      color: #eee;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: #222;
-    }
-
-    .thread-close-btn {
-      border-radius: 999px;
-      padding: 2px 6px;
-      font-size: 11px;
-      line-height: 1;
-      border: 1px solid #444;
-      background: #151515;
-      color: #eee;
-    }
-
-    .thread-close-btn:hover {
-      background: #222;
-    }
-
+    /* ---------------- HIGHLIGHT BRANCH BUTTON ---------------- */
     #selection-branch-btn {
       position: absolute;
-      z-index: 1000;
+      z-index: 9999;
       padding: 4px 8px;
       font-size: 11px;
       border-radius: 999px;
@@ -261,6 +205,7 @@
       box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     }
 
+    /* ---------------- SVG CONNECTION LINES ---------------- */
     #connection-layer {
       position: absolute;
       inset: 0;
@@ -276,981 +221,28 @@
       opacity: 0.7;
     }
   </style>
+
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
+
 <body>
-<header>
-  <h1>Branching Chat (Columns by Depth)</h1>
-  <div class="header-actions">
-    <div class="width-control">
-      <span>Width</span>
-      <input
-        type="range"
-        id="width-slider"
-        min="260"
-        max="640"
-        value="340"
-      />
-      <span id="width-label">340px</span>
-    </div>
-    <div class="header-buttons">
+  <header>
+    <h1>Branching Chat (Columns by Depth)</h1>
+    <div class="header-right">
+      <span class="width-label">Width</span>
+      <input id="width-slider" type="range" min="260" max="520" value="340" />
       <button id="refresh-layout-btn">↻ Refresh layout</button>
       <button id="new-root-btn">+ New root conversation</button>
     </div>
-  </div>
-</header>
+  </header>
 
-<div id="thread-container"></div>
-<button id="selection-branch-btn">Branch selection →</button>
+  <div id="thread-container"></div>
 
-<script>
-  // ---------- Global data ----------
-  let threadCounter = 1;
-  let messageCounter = 1;
-  let highlightCounter = 1;
-  let activeThreadId = null;
-  let pendingFocusThreadId = null;
+  <!-- Hidden branch-from-selection button -->
+  <button id="selection-branch-btn">Branch selection →</button>
 
-  const threads = [];   // {id, depth, parentId, title, messages, branchSource, prefY, y, manual, createdAt}
-
-  let THREAD_WIDTH = 340;
-  const COLUMN_GAP = 20;
-  const MIN_VERTICAL_GAP = 14;
-  const ROOT_GAP = 40;
-  const TOP_MARGIN = 40;
-
-  const containerEl = document.getElementById("thread-container");
-  const selectionBranchBtn = document.getElementById("selection-branch-btn");
-  const newRootBtn = document.getElementById("new-root-btn");
-  const refreshBtn = document.getElementById("refresh-layout-btn");
-  const widthSlider = document.getElementById("width-slider");
-  const widthLabel = document.getElementById("width-label");
-
-  // drag state
-  let dragState = null;
-
-  function getColumnLeft(depth) {
-    return depth * (THREAD_WIDTH + COLUMN_GAP);
-  }
-
-  function getThread(id) {
-    return threads.find(t => t.id === id);
-  }
-
-  // ---------- Core helpers ----------
-  function setActiveThread(id) {
-    activeThreadId = id;
-    pendingFocusThreadId = id;
-    render();
-  }
-
-  function createThread({
-    title,
-    depth,
-    parentId = null,
-    parentSnippet = null,
-    visibleSnippet = null,
-    branchSource = null,
-    y = null
-  }) {
-    const id = "t" + threadCounter++;
-    const createdAt = Date.now() + Math.random();
-
-    const messages = [];
-
-    if (parentSnippet) {
-      messages.push({
-        id: "m" + messageCounter++,
-        role: "system",
-        content: parentSnippet,
-        visibleSnippet
-      });
-    } else {
-      messages.push({
-        id: "m" + messageCounter++,
-        role: "system",
-        content: "You are a helpful local assistant in a root conversation node."
-      });
-    }
-
-    if (y === null) {
-      y = TOP_MARGIN;
-    }
-
-    const thread = {
-      id,
-      depth,
-      parentId,
-      title,
-      messages,
-      branchSource, // { parentThreadId, parentMessageId, anchorFrac }
-      createdAt,
-      manual: false,
-      prefY: y,
-      y
-    };
-
-    threads.push(thread);
-    if (!activeThreadId) activeThreadId = thread.id;
-    return thread;
-  }
-
-  function keepThreadScrolledToBottom(threadId) {
-    const threadEl = [...document.querySelectorAll(".thread")]
-      .find(el => el.dataset.threadId === threadId);
-    if (!threadEl) return;
-    const bodyEl = threadEl.querySelector(".thread-body");
-    if (!bodyEl) return;
-    bodyEl.scrollTop = bodyEl.scrollHeight;
-  }
-
-  function focusInputForThread(threadId) {
-    const inputEl = document.querySelector(
-      `.thread[data-thread-id="${threadId}"] input[type="text"]`
-    );
-    if (!inputEl) return;
-
-    try {
-      inputEl.focus({ preventScroll: true });
-    } catch {
-      inputEl.focus();
-    }
-
-    const val = inputEl.value;
-    inputEl.value = "";
-    inputEl.value = val;
-  }
-
-  // ---------- Messaging ----------
-  function addUserMessage(threadId, text) {
-    const thread = getThread(threadId);
-    if (!thread || !text.trim()) return;
-
-    thread.messages.push({
-      id: "m" + messageCounter++,
-      role: "user",
-      content: text.trim()
-    });
-
-    pendingFocusThreadId = threadId;
-    render();
-    keepThreadScrolledToBottom(threadId);
-    sendToBackend(thread);
-  }
-
-  async function sendToBackend(thread) {
-    const payloadMessages = thread.messages.map(m => ({
-      role: m.role,
-      content: m.content
-    }));
-
-    const thinking = {
-      id: "m" + messageCounter++,
-      role: "assistant",
-      content: "…"
-    };
-    thread.messages.push(thinking);
-
-    pendingFocusThreadId = thread.id;
-    render();
-    keepThreadScrolledToBottom(thread.id);
-
-    try {
-      const resp = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          thread_id: thread.id,
-          messages: payloadMessages
-        })
-      });
-
-      const data = await resp.json();
-      thinking.content = data.reply ?? "(no reply)";
-      pendingFocusThreadId = thread.id;
-      render();
-      keepThreadScrolledToBottom(thread.id);
-    } catch (err) {
-      thinking.content = "Error: " + err;
-      pendingFocusThreadId = thread.id;
-      render();
-      keepThreadScrolledToBottom(thread.id);
-    }
-  }
-
-  // ---------- Selection / branching ----------
-  function clearSelection() {
-    const sel = window.getSelection && window.getSelection();
-    if (sel && sel.removeAllRanges) sel.removeAllRanges();
-  }
-
-  function getSelectedTextInside(el) {
-    const sel = window.getSelection && window.getSelection();
-    if (!sel || sel.rangeCount === 0) return { raw: null, trimmed: null };
-
-    const range = sel.getRangeAt(0);
-    if (!el.contains(range.commonAncestorContainer)) {
-      return { raw: null, trimmed: null };
-    }
-
-    const raw = sel.toString();
-    const trimmed = raw.trim();
-
-    if (!trimmed.length) {
-      return { raw: null, trimmed: null };
-    }
-
-    return { raw, trimmed };
-  }
-
-  function computeGlobalSelectionMidIndex(parentThread, msg, rawSel, trimmedSel) {
-    const selText =
-      rawSel && rawSel.length
-        ? rawSel
-        : trimmedSel && trimmedSel.length
-        ? trimmedSel
-        : "";
-
-    let totalChars = 0;
-    let midGlobal = 0;
-
-    for (const m of parentThread.messages) {
-      const text = m.content || "";
-      if (m === msg) {
-        let idx = 0;
-        if (selText) {
-          const found = text.indexOf(selText);
-          if (found >= 0) idx = found;
-        }
-
-        const selLen = selText ? selText.length : 1;
-        const midInMsg = selLen % 2 === 1 ? (selLen - 1) / 2 : selLen / 2;
-
-        midGlobal = totalChars + idx + midInMsg;
-      }
-      totalChars += text.length;
-    }
-
-    return midGlobal;
-  }
-
-  function buildContextSnippet(msg, selectedText) {
-    const full = msg.content || "";
-    const s = selectedText || "";
-
-    if (!s) return full.slice(0, 1000);
-
-    const idx = full.indexOf(s);
-    if (idx === -1) return full.slice(0, 1000);
-
-    const before = full.lastIndexOf("\n\n", idx);
-    const after = full.indexOf("\n\n", idx + s.length);
-    const paraStart = before === -1 ? 0 : before + 2;
-    const paraEnd = after === -1 ? full.length : after;
-    const paragraph = full.slice(paraStart, paraEnd).trim();
-
-    const rest = (full.slice(0, paraStart) + "\n" + full.slice(paraEnd)).trim();
-    const restTrunc = rest.slice(0, 400);
-
-    let snippet = "";
-    snippet += `Paragraph context:\n"${paragraph}"\n\n`;
-    snippet += `Focused selection:\n"${s}"\n\n`;
-    if (restTrunc.length) {
-      snippet += `Other context from the same answer (truncated):\n"${restTrunc}"`;
-    }
-    return snippet;
-  }
-
-  function branchFromMessage(parentThreadId, messageId, msgElement, forcedSnippet = null) {
-    const parentThread = getThread(parentThreadId);
-    if (!parentThread) return;
-
-    const msg = parentThread.messages.find(m => m.id === messageId);
-    if (!msg) return;
-
-    const selInfo = getSelectedTextInside(msgElement);
-    const rawSel = selInfo.raw;
-    const trimmedSel = selInfo.trimmed;
-
-    const globalMid = computeGlobalSelectionMidIndex(
-      parentThread,
-      msg,
-      rawSel,
-      trimmedSel
-    );
-
-    // compute anchorFrac (0..1) inside parent card from DOM
-    let anchorFrac = 0.5;
-
-    const sel = window.getSelection && window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      const highlightRect = range.getBoundingClientRect();
-      const threadEl = msgElement.closest(".thread");
-      if (threadEl) {
-        const tr = threadEl.getBoundingClientRect();
-        const parentHeight = tr.height || 1;
-        const centerInsideParent = highlightRect.top + highlightRect.height / 2 - tr.top;
-        anchorFrac = Math.min(1, Math.max(0, centerInsideParent / parentHeight));
-      }
-    }
-
-    const snippet = forcedSnippet || buildContextSnippet(msg, trimmedSel);
-    const newDepth = parentThread.depth + 1;
-    const visibleSnippet = trimmedSel || snippet.slice(0, 120);
-
-    const childThread = createThread({
-      title: visibleSnippet || "Branch",
-      depth: newDepth,
-      parentId: parentThread.id,
-      parentSnippet: snippet,
-      visibleSnippet,
-      branchSource: {
-        parentThreadId: parentThread.id,
-        parentMessageId: msg.id,
-        globalPosition: globalMid,
-        anchorFrac
-      }
-    });
-
-    if (!msg.highlights) msg.highlights = [];
-    msg.highlights.push({
-      id: "h" + highlightCounter++,
-      text: visibleSnippet,
-      targetThreadId: childThread.id
-    });
-
-    activeThreadId = childThread.id;
-    pendingFocusThreadId = childThread.id;
-    render();
-    scrollToRight();
-  }
-
-  document.addEventListener("selectionchange", () => {
-    const sel = window.getSelection && window.getSelection();
-    if (!sel || sel.rangeCount === 0) {
-      selectionBranchBtn.style.display = "none";
-      return;
-    }
-
-    const range = sel.getRangeAt(0);
-    const container = range.commonAncestorContainer;
-
-    const msgEl = container.nodeType === 1
-      ? container.closest(".msg")
-      : container.parentElement && container.parentElement.closest(".msg");
-
-    if (!msgEl) {
-      selectionBranchBtn.style.display = "none";
-      return;
-    }
-
-    const threadEl = msgEl.closest(".thread");
-    if (!threadEl) {
-      selectionBranchBtn.style.display = "none";
-      return;
-    }
-
-    const selectedText = sel.toString().trim();
-    if (!selectedText.length) {
-      selectionBranchBtn.style.display = "none";
-      return;
-    }
-
-    const rect = range.getBoundingClientRect();
-    selectionBranchBtn.style.display = "block";
-    selectionBranchBtn.style.left = (rect.left + rect.width / 2 - 50) + window.scrollX + "px";
-    selectionBranchBtn.style.top = (rect.top - 30) + window.scrollY + "px";
-
-    selectionBranchBtn.dataset.threadId = threadEl.dataset.threadId;
-    selectionBranchBtn.dataset.messageId = msgEl.dataset.messageId;
-  });
-
-  selectionBranchBtn.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const threadId = selectionBranchBtn.dataset.threadId;
-    const messageId = selectionBranchBtn.dataset.messageId;
-
-    if (!threadId || !messageId) return;
-
-    const msgEl = document.querySelector(
-      `.thread[data-thread-id="${threadId}"] .msg[data-message-id="${messageId}"]`
-    );
-    if (!msgEl) return;
-
-    branchFromMessage(threadId, messageId, msgEl);
-    selectionBranchBtn.style.display = "none";
-    clearSelection();
-  });
-
-  // ---------- Close thread ----------
-  function closeThread(threadId) {
-    const toDelete = new Set([threadId]);
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const t of threads) {
-        if (!toDelete.has(t.id) && t.parentId && toDelete.has(t.parentId)) {
-          toDelete.add(t.id);
-          changed = true;
-        }
-      }
-    }
-
-    threads.forEach(t => {
-      t.messages.forEach(m => {
-        if (m.highlights) {
-          m.highlights = m.highlights.filter(
-            h => !toDelete.has(h.targetThreadId)
-          );
-        }
-      });
-    });
-
-    for (let i = threads.length - 1; i >= 0; i--) {
-      if (toDelete.has(threads[i].id)) {
-        threads.splice(i, 1);
-      }
-    }
-
-    if (toDelete.has(activeThreadId)) {
-      activeThreadId = threads.length ? threads[0].id : null;
-    }
-
-    pendingFocusThreadId = activeThreadId;
-    render();
-  }
-
-  // ---------- SVG connections ----------
-  const SVG_NS = "http://www.w3.org/2000/svg";
-
-  function ensureConnectionLayer() {
-    let svg = containerEl.querySelector("#connection-layer");
-    if (!svg) {
-      svg = document.createElementNS(SVG_NS, "svg");
-      svg.id = "connection-layer";
-      containerEl.prepend(svg);
-    }
-    svg.setAttribute("width", containerEl.scrollWidth);
-    svg.setAttribute("height", containerEl.scrollHeight);
-    svg.style.width = containerEl.scrollWidth + "px";
-    svg.style.height = containerEl.scrollHeight + "px";
-    svg.innerHTML = "";
-    return { svg, containerRect: containerEl.getBoundingClientRect() };
-  }
-
-  function drawConnections() {
-    if (!threads.length) return;
-    const { svg, containerRect } = ensureConnectionLayer();
-
-    const scrollLeft = containerEl.scrollLeft;
-    const scrollTop = containerEl.scrollTop;
-
-    threads.forEach(thread => {
-      if (!thread.parentId) return;
-
-      const parentEl = containerEl.querySelector(
-        `.thread[data-thread-id="${thread.parentId}"]`
-      );
-      const childEl = containerEl.querySelector(
-        `.thread[data-thread-id="${thread.id}"]`
-      );
-      if (!parentEl || !childEl) return;
-
-      const anchorHighlight = parentEl.querySelector(
-        `.branch-highlight[data-target-thread-id="${thread.id}"]`
-      );
-
-      let x1, y1;
-
-      if (anchorHighlight) {
-        const hr = anchorHighlight.getBoundingClientRect();
-        x1 = hr.right - containerRect.left + scrollLeft;
-        y1 = hr.top + hr.height / 2 - containerRect.top + scrollTop;
-      } else {
-        const pr = parentEl.getBoundingClientRect();
-        x1 = pr.right - containerRect.left + scrollLeft;
-        y1 = pr.top + pr.height / 2 - containerRect.top + scrollTop;
-      }
-
-      const headerEl = childEl.querySelector(".thread-header") || childEl;
-      const cr = headerEl.getBoundingClientRect();
-      const x2 = cr.left - containerRect.left + scrollLeft;
-      const y2 = cr.top + cr.height / 2 - containerRect.top + scrollTop;
-
-      const dx = (x2 - x1) * 0.5;
-
-      const path = document.createElementNS(SVG_NS, "path");
-      const d = `M ${x1} ${y1} C ${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
-      path.setAttribute("d", d);
-      path.setAttribute("class", "thread-connection");
-
-      svg.appendChild(path);
-    });
-  }
-
-  function scrollToRight() {
-    containerEl.scrollLeft = containerEl.scrollWidth;
-  }
-
-  // ---------- Layout engine ----------
-  function layout(options = {}) {
-    if (!threads.length) return;
-    if (dragState) return; // don't fight user while dragging
-
-    const { centerParents = false } = options;
-
-    // measure heights
-    const heights = {};
-    threads.forEach(t => {
-      const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-      heights[t.id] = el ? (el.offsetHeight || 200) : 200;
-    });
-
-    // Step 1: roots preferred positions (if none yet)
-    const roots = threads
-      .filter(t => t.depth === 0)
-      .sort((a, b) => a.createdAt - b.createdAt);
-
-    let currentRootY = TOP_MARGIN;
-    for (const r of roots) {
-      if (r.prefY == null) {
-        r.prefY = currentRootY;
-      }
-      currentRootY = r.prefY + (heights[r.id] || 200) + ROOT_GAP;
-    }
-
-    // Step 2: preferred positions for children (non-manual)
-    const maxDepth = Math.max(...threads.map(t => t.depth));
-    for (let d = 1; d <= maxDepth; d++) {
-      const lane = threads.filter(t => t.depth === d);
-      lane.forEach(t => {
-        if (t.manual) return;
-        const parent = getThread(t.parentId);
-        if (!parent) return;
-        const parentY = parent.y ?? parent.prefY ?? TOP_MARGIN;
-        const parentH = heights[parent.id] || 200;
-        const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
-          ? t.branchSource.anchorFrac
-          : 0.5;
-        const center = parentY + frac * parentH;
-        const h = heights[t.id] || 200;
-        t.prefY = center - h / 2;
-      });
-    }
-
-    // Step 3: pack each column (no overlaps, preserve order)
-    const depths = Array.from(new Set(threads.map(t => t.depth))).sort((a, b) => a - b);
-
-    depths.forEach(d => {
-      const lane = threads.filter(t => t.depth === d);
-
-      const sorted = lane.slice().sort((a, b) => {
-        function key(t) {
-          const parent = getThread(t.parentId);
-          const parentY = parent ? (parent.y ?? parent.prefY ?? 0) : (t.prefY ?? 0);
-          const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
-            ? t.branchSource.anchorFrac
-            : 0.5;
-          return { parentY, frac, createdAt: t.createdAt };
-        }
-        const ka = key(a);
-        const kb = key(b);
-        if (ka.parentY !== kb.parentY) return ka.parentY - kb.parentY;
-        if (ka.frac !== kb.frac) return ka.frac - kb.frac;
-        return ka.createdAt - kb.createdAt;
-      });
-
-      let prevBottom = -Infinity;
-      for (const t of sorted) {
-        const h = heights[t.id] || 200;
-        let cand = t.prefY ?? TOP_MARGIN;
-        if (cand < prevBottom + MIN_VERTICAL_GAP) {
-          cand = prevBottom + MIN_VERTICAL_GAP;
-        }
-        t.y = cand;
-        prevBottom = cand + h;
-
-        const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-        if (el) el.style.top = `${cand}px`;
-      }
-    });
-
-    // Step 4: optional parent centering on refresh
-    if (centerParents) {
-      const childrenByParent = new Map();
-      threads.forEach(child => {
-        if (!child.parentId) return;
-        const pId = child.parentId;
-        const h = heights[child.id] || 200;
-        const top = child.y ?? child.prefY ?? TOP_MARGIN;
-        const bottom = top + h;
-        const existing = childrenByParent.get(pId);
-        if (!existing) {
-          childrenByParent.set(pId, { top, bottom });
-        } else {
-          existing.top = Math.min(existing.top, top);
-          existing.bottom = Math.max(existing.bottom, bottom);
-        }
-      });
-
-      childrenByParent.forEach((cluster, parentId) => {
-        const parent = getThread(parentId);
-        if (!parent || parent.manual) return;
-        const h = heights[parent.id] || 200;
-        const center = (cluster.top + cluster.bottom) / 2;
-        parent.prefY = center - h / 2;
-      });
-
-      // re-pack columns once using new parent prefYs
-      depths.forEach(d => {
-        const lane = threads.filter(t => t.depth === d);
-        const sorted = lane.slice().sort((a, b) => {
-          function key(t) {
-            const parent = getThread(t.parentId);
-            const parentY = parent ? (parent.y ?? parent.prefY ?? 0) : (t.prefY ?? 0);
-            const frac = (t.branchSource && typeof t.branchSource.anchorFrac === "number")
-              ? t.branchSource.anchorFrac
-              : 0.5;
-            return { parentY, frac, createdAt: t.createdAt };
-          }
-          const ka = key(a);
-          const kb = key(b);
-          if (ka.parentY !== kb.parentY) return ka.parentY - kb.parentY;
-          if (ka.frac !== kb.frac) return ka.frac - kb.frac;
-          return ka.createdAt - kb.createdAt;
-        });
-
-        let prevBottom = -Infinity;
-        for (const t of sorted) {
-          const h = heights[t.id] || 200;
-          let cand = t.prefY ?? TOP_MARGIN;
-          if (cand < prevBottom + MIN_VERTICAL_GAP) {
-            cand = prevBottom + MIN_VERTICAL_GAP;
-          }
-          t.y = cand;
-          prevBottom = cand + h;
-          const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-          if (el) el.style.top = `${cand}px`;
-        }
-      });
-    }
-
-    // Step 5: global normalization so the topmost is at TOP_MARGIN
-    let minY = Infinity;
-    threads.forEach(t => {
-      if (typeof t.y === "number" && t.y < minY) minY = t.y;
-    });
-    if (minY !== Infinity && minY !== TOP_MARGIN) {
-      const shift = TOP_MARGIN - minY;
-      threads.forEach(t => {
-        t.y += shift;
-        if (typeof t.prefY === "number") t.prefY += shift;
-        const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-        if (el) el.style.top = `${t.y}px`;
-      });
-    }
-  }
-
-  // ---------- Drag handlers ----------
-  function startDrag(thread, headerEl, e) {
-    if (e.button !== 0) return;
-    if (e.target.closest(".thread-close-btn")) return;
-
-    e.preventDefault();
-    dragState = {
-      threadId: thread.id,
-      startY: e.clientY,
-      originalTop: thread.y ?? thread.prefY ?? TOP_MARGIN
-    };
-    headerEl.classList.add("dragging");
-
-    document.addEventListener("mousemove", onDragMove);
-    document.addEventListener("mouseup", onDragEnd);
-  }
-
-  function onDragMove(e) {
-    if (!dragState) return;
-    const t = getThread(dragState.threadId);
-    if (!t) return;
-
-    const dy = e.clientY - dragState.startY;
-    const newTop = dragState.originalTop + dy;
-
-    t.y = newTop;
-    t.prefY = newTop;
-
-    const el = containerEl.querySelector(`.thread[data-thread-id="${t.id}"]`);
-    if (el) el.style.top = `${newTop}px`;
-
-    drawConnections();
-  }
-
-  function onDragEnd() {
-    if (!dragState) return;
-    const { threadId } = dragState;
-    const t = getThread(threadId);
-
-    const headerEl = containerEl.querySelector(
-      `.thread[data-thread-id="${threadId}"] .thread-header`
-    );
-    if (headerEl) headerEl.classList.remove("dragging");
-
-    document.removeEventListener("mousemove", onDragMove);
-    document.removeEventListener("mouseup", onDragEnd);
-
-    if (t) {
-      t.manual = true;
-      t.prefY = t.y;
-    }
-
-    dragState = null;
-
-    layout({ centerParents: false });
-    drawConnections();
-  }
-
-  // ---------- Rendering ----------
-  newRootBtn.onclick = () => {
-    const t = createThread({
-      title: "Root " + threadCounter,
-      depth: 0,
-      parentId: null,
-      parentSnippet: null
-    });
-    activeThreadId = t.id;
-    pendingFocusThreadId = t.id;
-    render();
-    scrollToRight();
-  };
-
-  refreshBtn.onclick = () => {
-    requestAnimationFrame(() => {
-      layout({ centerParents: true });
-      drawConnections();
-    });
-  };
-
-  widthSlider.addEventListener("input", () => {
-    const v = parseInt(widthSlider.value, 10) || 340;
-    THREAD_WIDTH = v;
-    document.documentElement.style.setProperty("--thread-width", `${v}px`);
-    widthLabel.textContent = `${v}px`;
-    // Re-render so heights are re-measured and layout recalcs
-    render();
-  });
-
-  function renderMessageText(msg, container) {
-    const baseText = msg.visibleSnippet
-      ? `Branch context: "${msg.visibleSnippet}"`
-      : msg.content;
-
-    if (!msg.highlights || msg.highlights.length === 0) {
-      container.textContent = baseText;
-      return;
-    }
-
-    const text = baseText;
-    const highlights = msg.highlights.slice();
-
-    highlights.sort((a, b) => {
-      const ia = text.indexOf(a.text);
-      const ib = text.indexOf(b.text);
-      return ia - ib;
-    });
-
-    let cursor = 0;
-
-    for (const h of highlights) {
-      const idx = text.indexOf(h.text, cursor);
-      if (idx === -1) continue;
-
-      if (idx > cursor) {
-        container.appendChild(
-          document.createTextNode(text.slice(cursor, idx))
-        );
-      }
-
-      const span = document.createElement("span");
-      span.className = "branch-highlight";
-      span.dataset.highlightId = h.id;
-      span.dataset.targetThreadId = h.targetThreadId;
-      span.textContent = h.text;
-      container.appendChild(span);
-
-      cursor = idx + h.text.length;
-    }
-
-    if (cursor < text.length) {
-      container.appendChild(document.createTextNode(text.slice(cursor)));
-    }
-  }
-
-  function render() {
-    const prevScrollTop = containerEl.scrollTop;
-    const prevScrollLeft = containerEl.scrollLeft;
-
-    containerEl.innerHTML = "";
-
-    if (!threads.length) return;
-    if (!activeThreadId && threads.length > 0) {
-      activeThreadId = threads[0].id;
-    }
-
-    for (const thread of threads) {
-      const threadEl = document.createElement("div");
-      threadEl.className = "thread";
-      threadEl.dataset.threadId = thread.id;
-
-      const left = getColumnLeft(thread.depth);
-      const top = thread.y ?? thread.prefY ?? TOP_MARGIN;
-      threadEl.style.left = `${left}px`;
-      threadEl.style.top = `${top}px`;
-
-      if (thread.id === activeThreadId) {
-        threadEl.classList.add("active");
-      } else {
-        threadEl.classList.add("collapsed");
-      }
-
-      threadEl.addEventListener("click", (e) => {
-        const sel = window.getSelection && window.getSelection();
-        if (sel && sel.toString().trim()) return;
-        if (e.target.closest("input") || e.target.closest("button")) return;
-        setActiveThread(thread.id);
-      });
-
-      const headerEl = document.createElement("div");
-      headerEl.className = "thread-header";
-
-      const titleSpan = document.createElement("span");
-      titleSpan.className = "thread-title";
-      titleSpan.textContent = thread.title;
-
-      const metaSpan = document.createElement("span");
-      metaSpan.className = "thread-meta";
-      metaSpan.textContent = thread.depth === 0 ? "Root" : `Depth ${thread.depth}`;
-
-      const closeBtn = document.createElement("button");
-      closeBtn.className = "thread-close-btn";
-      closeBtn.textContent = "×";
-      closeBtn.title = "Close this node and its branches";
-      closeBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        closeThread(thread.id);
-      });
-
-      headerEl.appendChild(titleSpan);
-      headerEl.appendChild(metaSpan);
-      headerEl.appendChild(closeBtn);
-
-      headerEl.addEventListener("click", () => setActiveThread(thread.id));
-      headerEl.addEventListener("mousedown", (e) => startDrag(thread, headerEl, e));
-
-      threadEl.appendChild(headerEl);
-
-      const bodyEl = document.createElement("div");
-      bodyEl.className = "thread-body";
-
-      for (const msg of thread.messages) {
-        const msgEl = document.createElement("div");
-        msgEl.className = "msg " + msg.role;
-        msgEl.dataset.messageId = msg.id;
-
-        const metaEl = document.createElement("div");
-        metaEl.className = "msg-meta";
-
-        const roleSpan = document.createElement("span");
-        roleSpan.className = "msg-role";
-        roleSpan.textContent = msg.role;
-        metaEl.appendChild(roleSpan);
-
-        msgEl.appendChild(metaEl);
-
-        const textEl = document.createElement("div");
-        textEl.className = "msg-text";
-        renderMessageText(msg, textEl);
-
-        msgEl.appendChild(textEl);
-        bodyEl.appendChild(msgEl);
-      }
-
-      threadEl.appendChild(bodyEl);
-
-      const footerEl = document.createElement("div");
-      footerEl.className = "thread-footer";
-
-      const inputEl = document.createElement("input");
-      inputEl.type = "text";
-      inputEl.placeholder = `Type in ${thread.id}…`;
-
-      inputEl.addEventListener("focus", () => {
-        if (activeThreadId === thread.id) return;
-
-        const prevActive = document.querySelector(".thread.active");
-        if (prevActive) {
-          prevActive.classList.remove("active");
-          prevActive.classList.add("collapsed");
-        }
-
-        const current = inputEl.closest(".thread");
-        if (current) {
-          current.classList.remove("collapsed");
-          current.classList.add("active");
-        }
-
-        activeThreadId = thread.id;
-      });
-
-      inputEl.onkeydown = (e) => {
-        if (e.key === "Enter") {
-          addUserMessage(thread.id, inputEl.value);
-          inputEl.value = "";
-        }
-      };
-
-      const sendBtn = document.createElement("button");
-      sendBtn.textContent = "Send";
-      sendBtn.onclick = () => {
-        addUserMessage(thread.id, inputEl.value);
-        inputEl.value = "";
-      };
-
-      footerEl.appendChild(inputEl);
-      footerEl.appendChild(sendBtn);
-      threadEl.appendChild(footerEl);
-
-      containerEl.appendChild(threadEl);
-    }
-
-    requestAnimationFrame(() => {
-      containerEl.scrollTop = prevScrollTop;
-      containerEl.scrollLeft = prevScrollLeft;
-
-      if (pendingFocusThreadId) {
-        const toFocus = pendingFocusThreadId;
-        pendingFocusThreadId = null;
-        focusInputForThread(toFocus);
-      }
-
-      layout({ centerParents: false });
-      drawConnections();
-    });
-  }
-
-  // ---------- Boot ----------
-  document.documentElement.style.setProperty("--thread-width", `${THREAD_WIDTH}px`);
-  widthLabel.textContent = `${THREAD_WIDTH}px`;
-
-  const first = createThread({
-    title: "Root 1",
-    depth: 0,
-    parentId: null,
-    parentSnippet: null
-  });
-  activeThreadId = first.id;
-  pendingFocusThreadId = first.id;
-  render();
-</script>
+  <!-- Main JS entry -->
+  <script type="module" src="./main.js"></script>
 </body>
 </html>
