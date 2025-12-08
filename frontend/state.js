@@ -10,6 +10,9 @@ let highlightCounter = 1;
 let activeThreadId = null;
 let pendingFocusThreadId = null;
 
+// Default model spec for new root nodes (should match your backend default)
+export const DEFAULT_MODEL_SPEC = "ollama/qwen2.5:7b";
+
 // exported so layout / main can read or modify
 export function getActiveThreadId() {
   return activeThreadId;
@@ -40,6 +43,7 @@ export function createThread({
   visibleSnippet = null,
   branchSource = null,
   initialY = null,
+  modelSpec = null, // e.g. "ollama/qwen2.5:7b", "openai/gpt-4.1-mini"
 }) {
   const id = "t" + threadCounter++;
   const createdAt = Date.now() + Math.random();
@@ -72,6 +76,7 @@ export function createThread({
     manual: false,
     prefY: initialY,
     y: initialY,
+    modelSpec: modelSpec ?? DEFAULT_MODEL_SPEC,
   };
 
   threads.push(thread);
@@ -93,6 +98,7 @@ export function createRootThread() {
     visibleSnippet: null,
     branchSource: null,
     initialY: 40, // TOP_MARGIN, layout will normalize anyway
+    modelSpec: DEFAULT_MODEL_SPEC,
   });
   setActiveThreadId(t.id);
   return t;
@@ -183,4 +189,12 @@ export function ensureActiveThread() {
     pendingFocusThreadId = activeThreadId;
   }
   return getThread(activeThreadId);
+}
+
+// -------- Model helpers --------
+
+export function setThreadModel(threadId, modelSpec) {
+  const t = getThread(threadId);
+  if (!t) return;
+  t.modelSpec = modelSpec;
 }

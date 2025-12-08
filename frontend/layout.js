@@ -3,7 +3,7 @@
 
 import { threads, getThread } from "./state.js";
 
-export let THREAD_WIDTH = 340;
+export let THREAD_WIDTH = 420;
 
 const COLUMN_GAP = 20;
 const MIN_VERTICAL_GAP = 14;

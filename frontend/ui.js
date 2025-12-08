@@ -14,6 +14,8 @@ import {
   getActiveThreadId,
   consumePendingFocusThreadId,
   ensureActiveThread,
+  DEFAULT_MODEL_SPEC,
+  setThreadModel,
 } from "./state.js";
 
 import {
@@ -34,6 +36,33 @@ let refreshBtn;
 let widthSlider;
 
 let dragState = null;
+
+// Available models (edit this list as you like)
+const MODEL_OPTIONS = [
+  // Local Ollama models from your screenshot
+  { value: "ollama/qwen2.5:7b", label: "Qwen2.5 7B (local)" },
+  { value: "ollama/qwen2.5:latest", label: "Qwen2.5 (latest, local)" },
+  { value: "ollama/qwen2.5:14b", label: "Qwen2.5 14B (local)" },
+  { value: "ollama/qwen3:14b", label: "Qwen3 14B (local)" },
+  { value: "ollama/qwen3:30b", label: "Qwen3 30B (local)" },
+  { value: "ollama/llama3.1:latest", label: "Llama 3.1 (local)" },
+  { value: "ollama/dolphin-mistral:latest", label: "Dolphin Mistral (local)" },
+  { value: "ollama/dolphin-mixtral:latest", label: "Dolphin Mixtral (local)" },
+  { value: "ollama/dolphin-llama3:latest", label: "Dolphin Llama3 (local)" },
+  { value: "ollama/dolphin-llama3:70b", label: "Dolphin Llama3 70B (local)" },
+  { value: "ollama/dolphin-llama3:70b-v2.9-q4_K_M", label: "Dolphin Llama3 70B v2.9 Q4_K_M (local)" },
+  { value: "ollama/dolphin70:latest", label: "Dolphin 70B (local)" },
+  { value: "ollama/mistral-small:24b-instruct-2501-q4_K_M", label: "Mistral Small 24B Instruct Q4_K_M (local)" },
+  { value: "ollama/mixtral:8x7b", label: "Mixtral 8x7B (local)" },
+  { value: "ollama/wizardlm-uncensored:latest", label: "WizardLM Uncensored (local)" },
+  { value: "ollama/wizard-vicuna-uncensored:latest", label: "Wizard Vicuna Uncensored (local)" },
+  { value: "ollama/llama2-uncensored:latest", label: "Llama2 Uncensored (local)" },
+
+  // Cloud: OpenAI & DeepSeek
+  { value: "openai/gpt-4.1-mini", label: "GPT-4.1-mini (OpenAI)" },
+  { value: "openai/gpt-4.1", label: "GPT-4.1 (OpenAI)" },
+  { value: "deepseek/deepseek-chat", label: "DeepSeek Chat (cloud)" },
+];
 
 // ---------- Public entry ----------
 export function setupUI() {
@@ -124,7 +153,7 @@ function buildThreadElement(thread) {
   threadEl.addEventListener("click", (e) => {
     const sel = window.getSelection && window.getSelection();
     if (sel && sel.toString().trim()) return;
-    if (e.target.closest("input") || e.target.closest("button")) return;
+    if (e.target.closest("input") || e.target.closest("button") || e.target.closest("select")) return;
     setActiveThreadId(thread.id);
     renderAll();
   });
@@ -190,6 +219,31 @@ function buildThreadElement(thread) {
   const footerEl = document.createElement("div");
   footerEl.className = "thread-footer";
 
+  // model select (per-thread)
+  const modelSelect = document.createElement("select");
+  modelSelect.className = "model-select";
+
+  MODEL_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt.value;
+    o.textContent = opt.label;
+    modelSelect.appendChild(o);
+  });
+
+  const initialModel =
+    thread.modelSpec ||
+    DEFAULT_MODEL_SPEC ||
+    (MODEL_OPTIONS[0] && MODEL_OPTIONS[0].value);
+
+  if (!thread.modelSpec) {
+    setThreadModel(thread.id, initialModel);
+  }
+
+  modelSelect.value = initialModel;
+  modelSelect.addEventListener("change", (e) => {
+    setThreadModel(thread.id, e.target.value);
+  });
+
   const inputEl = document.createElement("input");
   inputEl.type = "text";
   inputEl.placeholder = `Type in ${thread.id}…`;
@@ -216,6 +270,7 @@ function buildThreadElement(thread) {
     handleUserSend(thread.id, text);
   };
 
+  footerEl.appendChild(modelSelect);
   footerEl.appendChild(inputEl);
   footerEl.appendChild(sendBtn);
   threadEl.appendChild(footerEl);
@@ -420,6 +475,8 @@ function branchFromMessage(parentThreadId, messageId, msgElement) {
       anchorFrac,
     },
     initialY: null,
+    // children inherit their parent's model choice
+    modelSpec: parentThread.modelSpec || DEFAULT_MODEL_SPEC,
   });
 
   addHighlight(parentThread.id, msg.id, visibleSnippet, childThread.id);
@@ -513,10 +570,12 @@ async function handleUserSend(threadId, text) {
   keepThreadScrolledToBottom(threadId);
 
   try {
-    const payloadMessages = getThread(threadId).messages.map((m) => ({
+    const thread = getThread(threadId);
+    const payloadMessages = thread.messages.map((m) => ({
       role: m.role,
       content: m.content,
     }));
+    const modelSpec = thread.modelSpec || DEFAULT_MODEL_SPEC;
 
     const resp = await fetch("/api/chat", {
       method: "POST",
@@ -524,6 +583,7 @@ async function handleUserSend(threadId, text) {
       body: JSON.stringify({
         thread_id: threadId,
         messages: payloadMessages,
+        model: modelSpec,
       }),
     });
 

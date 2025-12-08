@@ -82,7 +82,7 @@
     /* ---------------- THREAD ---------------- */
     .thread {
       position: absolute;
-      width: 340px;
+      width: 420px;
       display: flex;
       flex-direction: column;
       background: #101010;
@@ -134,6 +134,22 @@
       gap: 6px;
       background: #0b0b0b;
       border-radius: 0 0 10px 10px;
+      align-items: center;
+    }
+
+    /* model selector inside footer */
+    .thread-footer select {
+      border-radius: 999px;
+      border: 1px solid #444;
+      background: #151515;
+      color: #eee;
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+
+    .thread-footer .model-select {
+      max-width: 160px;
+      flex-shrink: 0;
     }
 
     /* ---------------- MESSAGES ---------------- */
@@ -231,7 +247,7 @@
     <h1>Branching Chat (Columns by Depth)</h1>
     <div class="header-right">
       <span class="width-label">Width</span>
-      <input id="width-slider" type="range" min="260" max="520" value="340" />
+      <input id="width-slider" type="range" min="420" max="640" value="420" />
       <button id="refresh-layout-btn">↻ Refresh layout</button>
       <button id="new-root-btn">+ New root conversation</button>
     </div>
