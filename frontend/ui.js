@@ -77,6 +77,8 @@ export function setupUI() {
 
   wireHeader();
   wireSelectionHandling();
+  const initialWidth = parseInt(widthSlider.value, 10) || 460;
+  setThreadWidth(initialWidth);
 }
 
 export function renderAll() {
@@ -125,7 +127,7 @@ function wireHeader() {
   };
 
   widthSlider.addEventListener("input", () => {
-    const v = parseInt(widthSlider.value, 10) || 340;
+    const v = parseInt(widthSlider.value, 10) || 460;
     setThreadWidth(v);
     document.querySelectorAll(".thread").forEach((el) => {
       el.style.width = v + "px";
